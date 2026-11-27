@@ -24,7 +24,10 @@ function rateRow(it, card) {
 function itemTools(it, card) {
   return `<div class="tools"><button type="button" class="linkbtn small" data-act="item-explain">Explain</button>
     <button type="button" class="linkbtn small" data-act="item-more" aria-expanded="${!!it.more}">${it.more ? 'Less' : 'More'}</button>
+    ${it.phase !== 'answer' || (it.tb && it.tb.turns.length) ? `<button type="button" class="linkbtn small" data-act="item-redo">Start over</button>` : ''}
     ${it.more ? `<button type="button" class="linkbtn small" data-act="item-ask">Ask a question</button>
+    <button type="button" class="linkbtn small" data-act="card-edit" data-id="${esc(it.cardId)}">Edit</button>
+    <button type="button" class="linkbtn small" data-act="card-delete" data-id="${esc(it.cardId)}">Delete</button>
     <button type="button" class="linkbtn small" data-act="item-master">${card.mastered ? 'Un-master' : 'Mark mastered'}</button>
     <button type="button" class="linkbtn small" data-act="item-report">Report</button>` : ''}</div>${busyHtml('item')}`;
 }
@@ -57,7 +60,7 @@ function itemHtml(it) {
   const card = S.cards[it.cardId];
   if (!card) return emptyBox('This item was removed.') + `<div class="row"><button type="button" class="btn" data-act="item-skip">Next</button></div>`;
   const course = S.courses[card.courseId] || {}, unit = S.units[card.unitId] || {};
-  const meta = `<div class="meta">${chip(TYPE_LABEL[card.type] || 'Card', 'type-' + card.type)}${course.title ? chip(course.title) : ''}${unit.title ? chip(unit.title) : ''}${card.fromFeedback ? chip('Tutor feedback', 'due') : ''}${card.origin === 'added' ? chip('Added by Claude', 'added') : ''}${card.mastered ? chip('Mastered check-in', 'good') : ''}${card.leech ? chip('Leech', 'bad') : ''}</div>`;
+  const meta = `<div class="meta">${chip(TYPE_LABEL[card.type] || 'Card', 'type-' + card.type)}${course.title ? chip(course.title) : ''}${unit.title ? chip(unit.title) : ''}${card.fromFeedback ? chip('Tutor feedback', 'due') : ''}${card.origin === 'added' ? chip('Added by Claude', 'added') : card.origin === 'mine' ? chip('Your card', 'accent') : ''}${card.orig ? chip('Edited by you') : ''}${card.mastered ? chip('Mastered check-in', 'good') : ''}${card.leech ? chip('Leech', 'bad') : ''}</div>`;
   const body = card.type === 'teachback' ? tbHtml(it, card) : plainHtml(it, card);
   return `<div class="qcard" id="item">${meta}${body}</div>`;
 }
@@ -66,7 +69,7 @@ function plainHtml(it, card) {
   if (it.phase === 'answer') {
     if (card.type === 'flash') return head + `<div class="row"><button type="button" class="btn primary" data-act="item-reveal">Show answer</button></div>`;
     return head + `<label class="field"><span>${card.type === 'apply' ? 'Your response' : 'Your answer'}</span><textarea id="f-item-input" data-bind="${bk(it)}.input" rows="${card.type === 'apply' ? 6 : 3}" placeholder="Answer in your own words">${esc(it.input)}</textarea></label>
-    <div class="row">${micBtn('f-item-input')}<button type="button" class="btn primary" data-act="item-submit" ${isBusy('item') ? 'disabled' : ''}>${aiOn() ? 'Check my answer' : 'Show model answer'}</button><button type="button" class="btn ghost" data-act="item-dunno" ${isBusy('item') ? 'disabled' : ''}>I don't know</button></div>${micHint()}${busyHtml('item')}`;
+    <div class="row">${micBtn('f-item-input')}<button type="button" class="btn primary" data-act="item-submit" ${isBusy('item') ? 'disabled' : ''}>${aiOn() ? 'Check my answer' : 'Show model answer'}</button><button type="button" class="btn ghost" data-act="item-selfgrade" ${isBusy('item') ? 'disabled' : ''}>Just show the answer</button><button type="button" class="btn ghost" data-act="item-dunno" ${isBusy('item') ? 'disabled' : ''}>I don't know</button></div>${micHint()}${busyHtml('item')}`;
   }
   const r = it.res || {}, miss = r.rating === 'again' || r.verdict === 'incorrect';
   return head + (it.input ? `<div class="answer-box"><span class="lbl">You wrote</span><div class="body small">${paras(it.input)}</div></div>` : '') + verdictHtml(it, card) +
@@ -91,18 +94,18 @@ function tbHtml(it, card) {
       `<label class="field"><span>${retry ? 'Try again in your own words' : 'Explain it back in your own words'}</span><textarea id="f-item-input" data-bind="${bk(it)}.input" rows="6" placeholder="Type, or talk it through">${esc(it.input)}</textarea></label>
       <div class="row">${micBtn('f-item-input')}<button type="button" class="btn primary" data-act="${retry ? 'tb-retry-submit' : 'tb-submit'}" ${isBusy('item') ? 'disabled' : ''}>${retry ? 'Submit second try' : 'Submit explanation'}</button>
       ${!retry && tb.hints.length < 2 ? `<button type="button" class="btn" data-act="tb-hint" ${isBusy('item') ? 'disabled' : ''}>Hint (${2 - tb.hints.length} left, −10 each)</button>` : ''}
-      ${retry ? '' : `<button type="button" class="btn ghost" data-act="tb-dunno" ${isBusy('item') ? 'disabled' : ''}>I don't know</button>`}</div>${micHint()}${busyHtml('item')}`;
+      ${retry ? '' : `<button type="button" class="btn ghost" data-act="tb-show" ${isBusy('item') ? 'disabled' : ''}>Just show the answer</button><button type="button" class="btn ghost" data-act="tb-dunno" ${isBusy('item') ? 'disabled' : ''}>I don't know</button>`}</div>${micHint()}${busyHtml('item')}`;
   }
   if (tb.stage === 'probing') {
     const q = tb.probes[tb.pi];
     return head + convoHtml(tb) + `<div class="probe"><div class="row between"><span class="eyebrow">Follow-up ${tb.pi + 1} of ${tb.probes.length} · ${esc(cfg.probing)} probing</span><span class="row">${speakBtn('probe', 'Hear it', q)}${Voice.canSpeak() ? `<button type="button" class="btn sm ghost" data-act="voice-mute" aria-pressed="${cfg.voiceOn === false}">${cfg.voiceOn === false ? 'Unmute' : 'Mute'}</button>` : ''}</span></div><div class="qprompt">${inline(q)}</div></div>
       <label class="field"><span>Your answer</span><textarea id="f-item-input" data-bind="${bk(it)}.input" rows="3" placeholder="A few sentences">${esc(it.input)}</textarea></label>
-      <div class="row">${micBtn('f-item-input')}<button type="button" class="btn primary" data-act="tb-probe-answer" ${isBusy('item') ? 'disabled' : ''}>Answer</button><button type="button" class="btn ghost" data-act="tb-probe-skip" ${isBusy('item') ? 'disabled' : ''}>Skip this one</button></div>${micHint()}${busyHtml('item')}`;
+      <div class="row">${micBtn('f-item-input')}<button type="button" class="btn primary" data-act="tb-probe-answer" ${isBusy('item') ? 'disabled' : ''}>Answer</button><button type="button" class="btn ghost" data-act="tb-probe-skip" ${isBusy('item') ? 'disabled' : ''}>Skip this one</button><button type="button" class="btn ghost" data-act="item-redo" ${isBusy('item') ? 'disabled' : ''}>Start over</button></div>${micHint()}${busyHtml('item')}`;
   }
   if (tb.stage === 'self') {
-    return head + convoHtml(tb) + `<div class="answer-box"><span class="lbl">Grade yourself</span><div class="small">Claude isn't available, so tick each key point your explanation covered.</div>
+    return head + convoHtml(tb) + `<div class="answer-box"><span class="lbl">Grade yourself</span><div class="small">${tb.shown ? 'Tick each key point you could have explained without looking.' : 'Claude isn\'t available, so tick each key point your explanation covered.'}</div>${tb.shown ? `<div class="body small">${paras(card.answer)}</div>` : ''}
       ${(card.rubric || []).map((p, i) => `<label class="tick"><input type="checkbox" id="tick-${i}" data-act-change="tb-tick" data-i="${i}" ${tb.ticks[i] ? 'checked' : ''}><span>${esc(p)}</span></label>`).join('')}</div>
-      <div class="row"><button type="button" class="btn primary" data-act="tb-self-score">Score me</button></div>`;
+      <div class="row"><button type="button" class="btn primary" data-act="tb-self-score">Score me</button><button type="button" class="btn ghost" data-act="item-redo">Start over</button></div>`;
   }
   const g = tb.grade || { points: [] }, r = it.res || {};
   const gap = (g.points || []).some(p => !p.hit);
@@ -174,6 +177,8 @@ Object.assign(ACT, {
     Voice.stop();
     await afterItem(done);
   },
+  'tb-show': () => { const it = curItem(), card = curCard(); if (!it || !card) return; const tb = tbState(it, card); tb.turns.push({ role: 'learner', text: '(looked at the answer without explaining)' }); tb.shown = true; tb.stage = 'self'; it.input = ''; render(); },
+  'item-redo': () => { const it = curItem(); if (!it) return; const fresh = newItem(it.cardId, it.ctx); Voice.stop(); if (it.ctx.lesson) UI.litem = fresh; else UI.item = fresh; render(); },
   'tb-tick': el => { const it = curItem(); if (it && it.tb) it.tb.ticks[+el.dataset.i] = el.checked; },
   'tb-dunno': () => { const it = curItem(), card = curCard(), tb = tbState(it, card); tb.grade = { points: (card.rubric || []).map(p => ({ point: p, hit: false })), feedback: 'Here are the key points. You\'ll see this idea again tomorrow.' }; tb.first = 0; tb.stage = 'final'; tb.retried = true; it.phase = 'graded'; it.res = { score: 0, verdict: 'incorrect', rating: 'again', ai: false }; render(); },
   'tb-hint': async () => {
@@ -259,6 +264,7 @@ async function openExplain(cardId, askFirst) {
   const segs = les && les.segs && les.segs.length ? les.segs : les && les.sid && S.sources[les.sid] ? Array.from({ length: num(S.sources[les.sid].segCount) }, (_, i) => les.sid + ':' + i) : unit ? unit.segs : null;
   if (segs && card.quote) { try { UI.ex.passage = L.passageAround(await unitMaterial({ segs }, 200000), card.quote); } catch (e) { } if (UI.modal && UI.modal.kind === 'explain') render(); }
 }
+const QUICK_ASKS = [['Simpler, please', 'Explain that more simply, as if I am completely new to this.'], ['Another example', 'Give me a different example, with different specifics.']];
 MODALS.explain = () => {
   const x = UI.ex, card = S.cards[x.cardId]; if (!card) return '<p>This item was removed.</p>';
   const res = r => r ? `<div class="stack tight">${partsHtml(r.parts)}${renderVisual(r.visual, 'Diagram added by Claude')}</div>` : '';
@@ -267,7 +273,7 @@ MODALS.explain = () => {
   <div class="stack"><div class="row between"><span class="eyebrow">Explanation</span>${aiOn() ? `<button class="btn sm" data-act="ex-explain" ${isBusy('ex') ? 'disabled' : ''}>${x.explain ? 'Explain again' : 'Explain it'}</button>` : ''}</div>
   ${card.explanation ? `<div class="small">${inline(card.explanation)}</div>` : ''}${res(x.explain)}</div>
   <div class="stack"><span class="eyebrow">Ask a question</span>${aiOn() ? `<textarea id="f-ex-ask" data-bind="ex.ask" rows="2" placeholder="A quick question about this item">${esc(x.ask)}</textarea>
-  <div class="row">${S.imagesOk ? `<label class="btn sm">Attach an image<input type="file" id="ex-image" accept="image/png,image/jpeg,image/webp" data-act-change="ex-image" hidden></label>${x.image ? chip('1 image attached', 'accent') : ''}` : ''}<button class="btn sm primary" data-act="ex-ask" ${isBusy('ex') ? 'disabled' : ''}>Ask</button></div>${res(x.answer)}` : needAI}</div>${busyHtml('ex')}`;
+  <div class="row">${S.imagesOk ? `<label class="btn sm">Attach an image<input type="file" id="ex-image" accept="image/png,image/jpeg,image/webp" data-act-change="ex-image" hidden></label>${x.image ? chip('1 image attached', 'accent') : ''}` : ''}<button class="btn sm primary" data-act="ex-ask" ${isBusy('ex') ? 'disabled' : ''}>Ask</button></div><div class="row">${QUICK_ASKS.map(([l, q]) => `<button type="button" class="btn sm ghost" data-act="ex-quick" data-q="${esc(q)}" ${isBusy('ex') ? 'disabled' : ''}>${l}</button>`).join('')}</div>${res(x.answer)}` : needAI}</div>${busyHtml('ex')}`;
 };
 Object.assign(ACT, {
   'ex-explain': async () => {
@@ -276,6 +282,7 @@ Object.assign(ACT, {
     const g = await task('ex', 'Explaining…', signal => ai(P.explain({ card: { prompt: card.type === 'teachback' ? card.ideaTitle : card.prompt, answer: card.answer, rubric: card.rubric }, passage: x.passage || card.quote, lessonText: tbc ? tbc.answer : '' }), { signal }));
     if (g) { x.explain = { parts: g.parts, visual: g.visual }; render(); }
   },
+  'ex-quick': el => { if (!UI.ex || isBusy('ex')) return; UI.ex.ask = el.dataset.q; return ACT['ex-ask'](); },
   'ex-image': el => { const f = el.files && el.files[0]; UI.ex.image = f && /^image\//.test(f.type) ? f : null; render(); },
   'ex-ask': async () => {
     const x = UI.ex, card = S.cards[x.cardId]; if (!card) return;
@@ -301,15 +308,20 @@ function startSession(o) {
   UI.item = o.ids.length ? newItem(o.ids[0], { mode: S.session.mode, bucket: S.session.bucket, kind: o.kind }) : null;
   go('review');
 }
-async function afterItem(saved) {
+async function afterItem(saved, extra) {
   const it = curItem();
   if (it && it.ctx.lesson) return lessonAdvance(saved);
   const s = S.session; if (!s) { render(); return; }
+  /* Each step is remembered so Previous can take it back. */
+  const h = { cardId: it ? it.cardId : null, undo: saved ? S.lastUndo : null, result: false, requeued: false, skipped: !!(extra && extra.skipped), snoozed: (extra && extra.snoozed) || null };
+  S.lastUndo = null;
   if (saved) {
     const second = s.idx >= s.firstCount;
-    if (!second) s.results.push(saved.lastSeen);
-    if (saved.lastSeen === 'again' && !second && !s.requeued.includes(it.cardId)) { s.requeued.push(it.cardId); s.ids.push(it.cardId); }
+    if (!second) { s.results.push(saved.lastSeen); h.result = true; }
+    if (saved.lastSeen === 'again' && !second && !s.requeued.includes(it.cardId)) { s.requeued.push(it.cardId); s.ids.push(it.cardId); h.requeued = true; }
   }
+  if (h.skipped) s.skipped = (s.skipped || 0) + 1;
+  (s.history = s.history || []).push(h);
   s.idx++;
   const second = s.idx >= s.firstCount;
   UI.item = s.idx < s.ids.length ? newItem(s.ids[s.idx], second ? { mode: 'light', bucket: 'none', kind: s.kind } : { mode: s.mode, bucket: s.bucket, kind: s.kind }) : null;
@@ -319,24 +331,51 @@ function sessionHtml() {
   const s = S.session;
   if (s.idx < s.ids.length && UI.item) {
     const second = s.idx >= s.firstCount;
-    return `<div class="reader"><div class="row between"><span class="small muted num">${esc(s.title)} · ${s.idx + 1} of ${s.ids.length}${second ? ' · second look at a miss' : ''}</span><button class="linkbtn small" data-act="session-end">End session</button></div>${bar(100 * s.idx / s.ids.length)}${itemHtml(UI.item)}</div>`;
+    return `<div class="reader"><div class="row between"><span class="small muted num">${esc(s.title)} · ${s.idx + 1} of ${s.ids.length}${second ? ' · second look at a miss' : ''}</span><span class="row"><button class="linkbtn small" data-act="session-back" ${s.history && s.history.length && !isBusy('commit') ? '' : 'disabled'}>← Previous</button><button class="linkbtn small" data-act="session-end">End session</button></span></div>${bar(100 * s.idx / s.ids.length)}${itemHtml(UI.item)}
+    <div class="row skiprow"><button type="button" class="btn sm ghost" data-act="session-skip">Skip for now</button>${s.mode === 'review' && !second ? '<button type="button" class="btn sm ghost" data-act="session-tomorrow">Not today</button>' : ''}<button type="button" class="linkbtn small" data-act="card-edit" data-id="${esc(UI.item.cardId)}">Edit</button><button type="button" class="linkbtn small" data-act="card-delete" data-id="${esc(UI.item.cardId)}">Delete</button></div><p class="small muted">${s.mode === 'review' && !second ? 'Skipping is not scored. Skip for now keeps the card due; Not today brings it back tomorrow.' : 'Skipping is not scored.'}</p></div>`;
   }
   s.seen = true;
   const counts = L.RATINGS.map(k => [k, s.results.filter(x => x === k).length]);
   const d = dayRec(), plan = todayPlan(), extra = s.kind === 'review' || s.kind === 'extra' ? todayPlan({ cap: L.EXTRA, used: d.extra, restDay: false }) : null;
   return `<div class="reader stack-lg"><div class="stack"><span class="eyebrow">Session done</span><h1>${plural(s.results.length, 'item')} reviewed</h1></div>
   <div class="panel stack">${s.kind === 'review' || s.kind === 'extra' ? meter(Math.min(d.units, L.CAP), 0) : ''}<div class="row">${counts.map(([k, n]) => chip(RATE_LABEL[k] + ' ' + n, k === 'again' ? 'bad' : k === 'hard' ? 'due' : k === 'good' ? 'good' : 'accent')).join('')}</div>
-  ${s.requeued.length ? `<p class="small muted">${plural(s.requeued.length, 'miss', 'misses')} shown again at the end, and due again tomorrow.</p>` : ''}
+  ${s.requeued.length ? `<p class="small muted">${plural(s.requeued.length, 'miss', 'misses')} shown again at the end, and due again tomorrow.</p>` : ''}${s.skipped ? `<p class="small muted">${plural(s.skipped, 'item')} skipped, not scored.</p>` : ''}
   <div class="row">${s.kind === 'review' && plan.items.length ? '<button class="btn primary" data-act="review-start">Keep going</button>' : ''}
   ${extra && !plan.items.length && extra.items.length ? `<button class="btn" data-act="review-extra">Do ${Math.min(L.EXTRA, extra.unitsPlanned)} more units</button><span class="small muted">Optional. Doesn't affect your streak.</span>` : ''}
   <a class="btn" href="#${esc(s.back)}">Done</a></div></div></div>`;
 }
 Object.assign(ACT, {
+  'session-skip': () => { const it = curItem(); if (!it || it.ctx.lesson || !S.session) return; Voice.stop(); return afterItem(null, { skipped: true }); },
+  'session-tomorrow': async () => {
+    const it = curItem(), c = curCard(), s = S.session; if (!it || !c || !s || it.ctx.lesson) return;
+    const tm = L.addDays(today(), 1), prev = c.mastered ? c.masteredDue : (c.fsrs || {}).due;
+    try { await put('cards', it.cardId, c.mastered ? Object.assign({}, c, { masteredDue: tm }) : Object.assign({}, c, { fsrs: Object.assign({}, c.fsrs, { due: tm }) })); } catch (e) { toast('That could not be saved. Try again.', true); return; }
+    Voice.stop(); await afterItem(null, { skipped: true, snoozed: { m: !!c.mastered, due: prev || null } });
+    /* Pushing cards to tomorrow can finish the day, but only after at least one real review. */
+    if (s.bucket === 'cap' && dayRec().units > 0) await checkDayDone();
+  },
+  'session-back': async () => {
+    const s = S.session; if (!s || !s.history || !s.history.length || isBusy('commit')) return;
+    const h = s.history.pop(); Voice.stop();
+    if (h.undo) await undoCommit(h.undo);
+    const c = h.cardId && S.cards[h.cardId];
+    if (h.snoozed && c) await put('cards', h.cardId, h.snoozed.m ? Object.assign({}, c, { masteredDue: h.snoozed.due }) : Object.assign({}, c, { fsrs: Object.assign({}, c.fsrs, { due: h.snoozed.due }) })).catch(() => { });
+    if (h.requeued) { const k = s.ids.lastIndexOf(h.cardId); if (k >= s.firstCount) s.ids.splice(k, 1); s.requeued = s.requeued.filter(x => x !== h.cardId); }
+    if (h.result) s.results.pop();
+    if (h.skipped) s.skipped = Math.max(0, (s.skipped || 0) - 1);
+    s.idx = Math.max(0, s.idx - 1);
+    const second = s.idx >= s.firstCount;
+    UI.item = newItem(s.ids[s.idx], second ? { mode: 'light', bucket: 'none', kind: s.kind } : { mode: s.mode, bucket: s.bucket, kind: s.kind });
+    render(); window.scrollTo(0, 0);
+  },
+  'review-ahead': () => { const ids = aheadCards().slice(0, 20).map(c => c.id); if (ids.length) startSession({ kind: 'ahead', title: 'Review ahead', ids, mode: 'review', bucket: 'none', back: 'review' }); },
   'session-end': () => { const s = S.session; if (s) { s.ids = s.ids.slice(0, s.idx); UI.item = null; } Voice.stop(); render(); },
   'review-start': () => { const q = todayPlan(); if (!q.items.length) { render(); return; } startSession({ kind: 'review', title: 'Daily review', ids: q.items.map(c => c.id), mode: 'review', bucket: 'cap', back: 'home' }); },
   'review-extra': () => { const q = todayPlan({ cap: L.EXTRA, used: dayRec().extra, restDay: false }); if (!q.items.length) { render(); return; } startSession({ kind: 'extra', title: 'Extra round', ids: q.items.map(c => c.id), mode: 'review', bucket: 'extra', back: 'home' }); },
   'rest-override': () => { UI.restOverride = true; render(); }
 });
+/* Cards that are scheduled but not due yet, soonest first. */
+function aheadCards() { const t = today(); return activeCards().filter(c => !c.mastered && c.fsrs && c.fsrs.due && c.fsrs.due > t && !(S.courses[c.courseId] || {}).archived).sort((a, b) => (a.fsrs.due < b.fsrs.due ? -1 : a.fsrs.due > b.fsrs.due ? 1 : 0)); }
 VIEWS.review = () => {
   if (S.session && S.session.day === today()) return sessionHtml();
   const d = dayRec(), q = todayPlan(), cfg = settingsFor(), extra = todayPlan({ cap: L.EXTRA, used: d.extra, restDay: false });
@@ -347,5 +386,6 @@ VIEWS.review = () => {
   ${q.restDay ? `<p>Today is one of your rest days, so your streak is safe and ${plural(q.dueTotal, 'due item')} roll to tomorrow.</p><div><button class="btn" data-act="rest-override">Review anyway</button></div>`
     : q.items.length ? `<div class="row"><button class="btn primary" data-act="review-start">Start review</button><span class="small muted">${[['teachback', 'teach-back'], ['apply', 'apply-it'], ['short', 'short answer'], ['flash', 'flashcard']].filter(([k]) => mix(k)).map(([k, l]) => plural(mix(k), l)).join(' · ')}</span></div>`
       : `<p>${activeCards().length ? 'Come back tomorrow, or keep going with a lesson.' : 'Cards appear here after you finish your first lesson.'}</p>${extra.items.length ? `<div class="row"><button class="btn" data-act="review-extra">Do ${Math.min(L.EXTRA, extra.unitsPlanned)} more units</button><span class="small muted">Optional extra round, once a day. ${plural(extra.dueTotal, 'item')} still due. Doesn't affect your streak.</span></div>` : ''}`}
+  ${aheadCards().length ? `<div class="row"><button class="btn" data-act="review-ahead">Review ahead (${Math.min(20, aheadCards().length)})</button><span class="small muted">Study cards before they are due. Each one is rescheduled from today. To practice one module without changing its schedule, use Practice on the course page.</span></div>` : ''}
   </div><p class="small muted">Target retention ${Math.round(cfg.retention * 100)}%. Probing: ${esc(cfg.probing)}. Change these in Settings (the gear icon).</p></div>`;
 };

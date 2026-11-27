@@ -216,6 +216,7 @@ async function logMistake(card, info) {
   try { await put('mistakes', id, { cardId: card.id || null, courseId: card.courseId, unitId: card.unitId || null, ideaId: card.ideaId || null, ideaTitle: L.str(card.ideaTitle, 160), prompt: L.str(info.prompt || card.prompt, 600), given: L.str(info.given, 800), why: L.str(info.why, 800), kind: info.kind || 'review', guess: !!info.guess, day: today(), at: Date.now() }); } catch (e) { }
   const all = list('mistakes').sort((a, b) => b.at - a.at);
   for (const old of all.slice(400)) drop('mistakes', old.id).catch(() => { });
+  return id;
 }
 /* r: { rating, guess, overridden, score, given, why, note, mode: 'review'|'light', bucket: 'cap'|'extra'|'none', kind } */
 async function commitCard(cardId, r) {
@@ -225,7 +226,8 @@ async function commitCard(cardId, r) {
   if (r.overridden && r.note) next.overrideNotes = L.arr(next.overrideNotes, 5).concat(L.str(r.note, 300)).slice(-5);
   try { await put('cards', cardId, next); } catch (e) { return null; }
   const miss = next.lastSeen === 'again';
-  if (miss) await logMistake(Object.assign({ id: cardId }, card), { given: r.given, why: r.why || card.explanation, kind: r.kind || 'review', guess: r.guess });
+  let mistakeId = null;
+  if (miss) mistakeId = await logMistake(Object.assign({ id: cardId }, card), { given: r.given, why: r.why || card.explanation, kind: r.kind || 'review', guess: r.guess });
   const xp = r.mode === 'light' ? (miss ? 0 : L.xpFor({ kind: 'game' })) : L.xpFor({ kind: 'card', type: card.type, rating: next.lastSeen, score: r.score, guess: r.guess });
   await bumpMeta((m, day) => {
     if (r.bucket === 'cap') day.units += L.cost(card); else if (r.bucket === 'extra') day.extra += L.cost(card);
@@ -234,7 +236,19 @@ async function commitCard(cardId, r) {
   });
   if (card.type === 'teachback' && r.mode !== 'light') await checkUnitPass(card.unitId);
   if (r.bucket === 'cap') await checkDayDone();
+  /* Enough to take this answer back when the learner taps Previous. */
+  S.lastUndo = { cardId, before: L.clone(card), bucket: r.bucket, cost: L.cost(card), xp, tb: card.type === 'teachback' && r.mode !== 'light' && !r.guess ? { hi: (r.score || 0) >= 90 } : null, mistakeId };
   return next;
+}
+async function undoCommit(u) {
+  if (!u || !S.cards[u.cardId]) return;
+  try { await put('cards', u.cardId, u.before); } catch (e) { return; }
+  if (u.mistakeId) drop('mistakes', u.mistakeId).catch(() => { });
+  await bumpMeta((m, day) => {
+    if (u.bucket === 'cap') day.units = Math.max(0, num(day.units) - u.cost); else if (u.bucket === 'extra') day.extra = Math.max(0, num(day.extra) - u.cost);
+    const x = Math.min(num(u.xp), num(day.xp)); m.xp = Math.max(0, num(m.xp) - x); day.xp = Math.max(0, num(day.xp) - x);
+    if (u.tb) { m.stats.teachbacks = Math.max(0, num(m.stats.teachbacks) - 1); if (u.tb.hi) m.stats.tb90 = Math.max(0, num(m.stats.tb90) - 1); }
+  });
 }
 async function checkDayDone() {
   const d = dayRec(); if (d.done) return;
@@ -245,8 +259,8 @@ async function checkDayDone() {
 }
 async function checkUnitPass(unitId) {
   const unit = S.units[unitId]; if (!unit || unit.passedAt) return;
-  if ((unit.lessons || []).some(l => !l.built)) return;
-  const st = L.unitStatus(cardsOf('unitId', unitId).filter(c => c.type === 'teachback' && c.status !== 'retired'), settingsFor(unit.courseId).strictness);
+  if ((unit.lessons || []).some(l => !l.built && !l.skip && !l.removed)) return;
+  const st = L.unitStatus(tbCards(unitId), settingsFor(unit.courseId).strictness);
   if (!st.passed) return;
   const first = !unit.passCounted;
   await patch('units', unitId, { passedAt: Date.now(), passScore: st.avg, passCounted: true }).catch(() => { });

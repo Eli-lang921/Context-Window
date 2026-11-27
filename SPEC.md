@@ -153,3 +153,15 @@ Three independent graders scored the first generated AI Cred course 64 (fidelity
 - **Self-check repairs**: the second pass returns fixes (relabel as added, replace text, drop a card), which are applied before the learner sees the topic. Only what it cannot fix stays as an open flag in plain language.
 - **Lesson rules**: hard word limit per idea; examples use only facts the material states about the learner (invented figures only inside "Suppose"); key points are claims, not logistics; hints never state a key point; at most one extra card per idea; near-duplicate cards are dropped across the course.
 - **Screens**: the course page shows the next topic, the exercise checklist, a "From your tutor's feedback" row and About you; the mind map is a module > topic > idea outline; on phones the Tutor sits in the tab bar.
+
+## 14. Round 4 controls (2026-11-27, modelled on Eli's Microeconomics Workbook)
+
+- **Skip in review**: two buttons under every card. "Skip for now" moves on unscored and the card stays due. "Not today" sends it to tomorrow unscored. The day can still count for the streak after cards are pushed to tomorrow, but only once at least one card was really reviewed.
+- **Previous**: steps back one card in a session and takes the last answer back (schedule, daily units, XP and the mistake entry are restored).
+- **Start over** on any card or explain-back before it is saved. **Just show the answer** on short, apply and explain-back items, followed by self-marking.
+- **Edit, Reset to original, Delete, Restore**: any card can be edited (question, answer, key points); the original is kept. Deleted cards sit under Progress, Reports, Deleted questions and can be restored or deleted forever.
+- **Own cards**: "New card" on a course or "Add my own card" on a topic; it joins review the same day.
+- **Review ahead** (up to 20 not-yet-due cards, rescheduled from today) and **Practice this module** (no effect on the schedule).
+- **Lessons**: Previous idea, Skip this idea, Back to the lesson, Skip explaining, Go through this topic again, and one-tap "Simpler, please" / "Another example".
+- **Courses**: rename a course, module or topic; skip a topic (Continue passes over it and it stops counting toward the module); delete a topic (restorable) or a module.
+- Nothing was removed (Eli chose "Keep everything").

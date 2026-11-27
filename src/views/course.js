@@ -5,12 +5,14 @@ const PROBING = [['light', 'Light (1-2)'], ['standard', 'Standard (3-4)'], ['dee
 const KIND_LABEL = { notes: 'Notes', file: 'File', photo: 'Photos', chat: 'From chat', vault: 'Obsidian', drive: 'Google Drive', notion: 'Notion', transcript: 'Transcript', article: 'Article' };
 
 function lessonIds(unit) { return (unit.lessons || []).map((l, n) => unit.id + 'L' + n); }
-function tbCards(unitId) { return cardsOf('unitId', unitId).filter(c => c.type === 'teachback' && c.status !== 'retired'); }
+/* A card whose topic was skipped or deleted does not count toward passing its module. */
+function offTopic(c) { const m = /^(.+)L(\d+)$/.exec(c.lessonId || ''), l = m && S.units[m[1]] && (S.units[m[1]].lessons || [])[+m[2]]; return !!(l && (l.skip || l.removed)); }
+function tbCards(unitId) { return cardsOf('unitId', unitId).filter(c => c.type === 'teachback' && c.status !== 'retired' && !offTopic(c)); }
 function unitProgress(unit) {
   const tb = tbCards(unit.id), done = tb.filter(c => c.firstScore != null).length;
   const st = L.unitStatus(tb, settingsFor(unit.courseId).strictness);
-  const ls = unit.lessons || [], builtN = ls.filter(l => l.built).length;
-  return { built: builtN > 0, pending: ls.length - builtN, lessons: ls.length, total: tb.length, done, avg: st.avg, passed: !!unit.passedAt };
+  const ls = (unit.lessons || []).filter(l => !l.removed), builtN = ls.filter(l => l.built).length;
+  return { built: builtN > 0, pending: ls.filter(l => !l.built && !l.skip).length, lessons: ls.length, total: tb.length, done, avg: st.avg, passed: !!unit.passedAt };
 }
 /* A "review cards only" lesson has no lesson to sit through, so it counts as done once it is built. */
 function lessonDone(lid) {
@@ -28,7 +30,7 @@ function nextLessonWhere(cid, want) {
     if (u.passedAt && u.reviewOnly) continue;
     const ls = u.lessons || [];
     if (!ls.length) { if ((u.tasks || []).length) continue; return { unit: u, build: true }; }
-    for (let n = 0; n < ls.length; n++) { if (!want(ls[n])) continue; if (!ls[n].built) return { unit: u, build: true }; if (!lessonDone(u.id + 'L' + n)) return { unit: u, lid: u.id + 'L' + n }; }
+    for (let n = 0; n < ls.length; n++) { if (ls[n].skip || ls[n].removed || !want(ls[n])) continue; if (!ls[n].built) return { unit: u, build: true }; if (!lessonDone(u.id + 'L' + n)) return { unit: u, lid: u.id + 'L' + n }; }
   }
   return null;
 }
@@ -319,6 +321,7 @@ async function buildUnit(uid) {
     const markBuilt = async n => { const ls = (S.units[uid].lessons || []).map((l, k) => (k === n ? Object.assign({}, l, { built: true }) : l)); await patch('units', uid, { lessons: ls, status: 'ready' }); };
     for (let n = 0; n < N; n++) {
       const lid = uid + 'L' + n, les = unit.lessons[n];
+      if (les.removed || les.skip) continue;
       const have = await getLesson(lid);
       if (have) { prior.push(...have.ideas.map(i => i.title)); if (!les.built) await markBuilt(n); continue; }
       const depth = L.DEPTHS.includes(les.depth) ? les.depth : 'full', early = unit.reviewOnly || depth === 'review';
@@ -376,6 +379,14 @@ async function buildUnit(uid) {
     return true;
   });
 }
+function unitEditHtml(u) {
+  const ls = u.lessons || [], gone = ls.map((l, n) => [l, n]).filter(([l]) => l.removed);
+  return `<div class="stack tight editbox">${field('Module name', `<input type="text" id="un-${u.id}" value="${esc(u.title)}" maxlength="120" data-act-change="unit-rename" data-uid="${u.id}">`)}
+    ${ls.some(l => !l.removed) ? '<span class="small muted">Topics: rename, skip (Continue passes over it) or delete.</span>' : ''}
+    ${ls.map((l, n) => (l.removed ? '' : `<div class="row nowrap"><input type="text" id="tp-${u.id}-${n}" value="${esc(l.title)}" maxlength="120" aria-label="Topic name" data-act-change="topic-rename" data-uid="${u.id}" data-n="${n}"><button type="button" class="btn sm ghost" data-act="topic-skip" data-uid="${u.id}" data-n="${n}">${l.skip ? 'Unskip' : 'Skip'}</button><button type="button" class="btn sm ghost" data-act="topic-remove" data-uid="${u.id}" data-n="${n}">Delete</button></div>`)).join('')}
+    ${gone.length ? `<div class="small muted">Deleted topics: ${gone.map(([l, n]) => `${esc(l.title)} <button type="button" class="linkbtn small" data-act="topic-restore" data-uid="${u.id}" data-n="${n}">Restore</button>`).join(' · ')}</div>` : ''}
+    <div class="row"><button type="button" class="btn sm ghost" data-act="unit-delete" data-uid="${u.id}">Delete this module</button></div></div>`;
+}
 function tasksHtml(u, openByDefault) {
   const ts = L.arr(u.tasks, 12); if (!ts.length) return '';
   const all = ts.flatMap(x => x.criteria || []), done = all.filter(x => x.done).length, left = ts.filter(x => (x.criteria || []).some(k => !k.done)).length, open = ui('tasks-' + u.id, !!openByDefault && done < all.length);
@@ -416,7 +427,7 @@ VIEWS.course = cid => {
       <div class="field"><span>Target retention</span>${seg('retention', [['', 'Default'], ['0.85', '85%'], ['0.9', '90%'], ['0.93', '93%'], ['0.95', '95%']], ov.retention ? String(ov.retention) : '', 'course-opt')}</div>
       <div class="row top">${field('Minutes per day', `<input type="text" id="co-min" value="${esc(c.minutesPerDay)}" inputmode="numeric" maxlength="3" data-act-change="course-field" data-f="minutesPerDay" style="max-width:8em">`)}${field('Target date', `<input type="date" id="co-dl" value="${esc(c.deadline || '')}" data-act-change="course-field" data-f="deadline">`)}</div>
       <p class="small muted">Pass mark for a module: ${L.passMark(cfg.strictness)}.</p></div>
-      <div class="panel stack"><h3>About this course</h3>${field('What you want from it', `<input type="text" id="co-goal" value="${esc(c.goal || '')}" maxlength="200" data-act-change="course-field" data-f="goal">`)}
+      <div class="panel stack"><h3>About this course</h3>${field('Course name', `<input type="text" id="co-title" value="${esc(c.title || '')}" maxlength="120" data-act-change="course-field" data-f="title">`)}${field('What you want from it', `<input type="text" id="co-goal" value="${esc(c.goal || '')}" maxlength="200" data-act-change="course-field" data-f="goal">`)}
       <div class="row top">${field('Exam questions', `<input type="text" id="co-exq" value="${esc((c.exam || {}).questions || '')}" inputmode="numeric" maxlength="3" data-act-change="course-field" data-f="exam.questions">`)}${field('Exam minutes', `<input type="text" id="co-exm" value="${esc((c.exam || {}).minutes || '')}" inputmode="numeric" maxlength="3" data-act-change="course-field" data-f="exam.minutes">`)}${field('Passing score', `<input type="text" id="co-exp" value="${esc((c.exam || {}).passing || '')}" maxlength="40" data-act-change="course-field" data-f="exam.passing">`)}</div>
       ${field('Exam question style', `<input type="text" id="co-exs" value="${esc((c.exam || {}).style || '')}" maxlength="200" data-act-change="course-field" data-f="exam.style">`)}</div>
       <div class="row"><button class="btn ghost danger" data-act="course-delete" data-cid="${cid}">Delete course</button></div>`}</div>`;
@@ -426,30 +437,54 @@ VIEWS.course = cid => {
   return `<div class="stack-lg">${head}
   <div class="row actions">${nx ? (nx.build ? `<button class="btn primary" data-act="unit-build" data-uid="${nx.unit.id}" ${aiOn() && !isBusy('build-' + nx.unit.id) ? '' : 'disabled'}>Build: ${esc(cut(nx.unit.title, 40))}</button>` : `<a class="btn primary" href="#learn-${nx.lid}">Continue: ${esc(cut(((nx.unit.lessons || [])[+nx.lid.split('L').pop()] || {}).title || nx.unit.title, 90))}</a>`) : ''}
     <a class="btn ${nx ? '' : 'primary'}" href="#add-${cid}">${icon('plus')}<span>Add learning</span></a></div>
-  <div class="row quiet"><button class="btn sm ghost" data-act="tutor-open">${icon('chat')}<span>Tutor</span></button><a class="btn sm ghost" href="#map-${cid}">Mind map</a><button class="btn sm ghost" data-act="toggle" data-key="cmenu-${cid}" aria-expanded="${!!menu}">${menu ? 'Hide tools' : 'More tools'}</button></div>
+  <div class="row quiet"><button class="btn sm ghost" data-act="tutor-open">${icon('chat')}<span>Tutor</span></button><a class="btn sm ghost" href="#map-${cid}">Mind map</a>${us.length ? `<button class="btn sm ghost" data-act="card-new" data-cid="${cid}">New card</button>` : ''}<button class="btn sm ghost" data-act="toggle" data-key="cmenu-${cid}" aria-expanded="${!!menu}">${menu ? 'Hide tools' : 'More tools'}</button></div>
   ${menu ? `<div class="menu">${tools.map(([h, t, d]) => `<a href="${h}"><b>${t}</b><span class="small muted">${d}</span></a>`).join('')}<button type="button" data-act="set" data-key="ctab-${cid}" data-val="material"><b>Sources</b><span class="small muted">What you have added</span></button><button type="button" data-act="set" data-key="ctab-${cid}" data-val="options"><b>Course options</b><span class="small muted">Strictness, probing, pace, delete</span></button></div>` : ''}
   ${feedbackRow(cid)}
   ${c.profile ? `<div class="stack tight"><button type="button" class="linkbtn small" data-act="toggle" data-key="about-${cid}" aria-expanded="${!!ui('about-' + cid, false)}">${ui('about-' + cid, false) ? 'Hide' : 'About you, from what you pasted'}</button>${ui('about-' + cid, false) ? `<p class="small muted">${esc(c.profile)}</p>` : ''}</div>` : ''}
   ${p.mode === 'deadline' && p.status !== 'done' && p.status !== 'past' && us.length ? `<div class="note"><b>Today's plan:</b> ${plural(p.lessonsPerDay, 'lesson')}, about ${p.minutesNeeded} minutes with review. You set aside ${num(c.minutesPerDay)} minutes a day.${p.status === 'behind' ? ' That is more than your daily time, so the target date is at risk: add minutes, move the date, or cut modules.' : ''}</div>` : ''}
   ${p.cramSuggested && !c.cram ? `<div class="note row between"><span><b>${p.daysLeft} days to your target date.</b> Cram mode reviews only the highest-yield ideas, on top of daily review.</span><button class="btn sm" data-act="cram-on" data-cid="${cid}">Turn on cram mode</button></div>` : ''}
   ${us.length ? `<div class="stack"><h2>Modules</h2>${us.map((u, i) => { const up = unitProgress(u), bkey = 'build-' + u.id; const gate = i > 0 && !us[i - 1].passedAt && !u.passedAt && !up.built;
-    return `<div class="panel stack tight unit"><div class="row between"><h3 class="grow">${esc(u.title)}</h3><div class="row">${u.reviewOnly ? chip('Review only', 'accent') : ''}${u.passedAt ? chip('Passed' + (u.passScore ? ' · ' + num(u.passScore) : ''), 'good') : up.built && up.total && up.done === up.total && !up.pending ? chip('Below pass mark · ' + up.avg, 'due') : ''}${u.kind === 'gaps' ? chip('Written by Claude, not in your course', 'added') : u.origin === 'added' ? chip('Added by Claude', 'added') : ''}</div></div>
+    const edit = ui('edit-' + u.id, false);
+    return `<div class="panel stack tight unit"><div class="row between"><h3 class="grow">${esc(u.title)}</h3><div class="row"><button type="button" class="linkbtn small" data-act="toggle" data-key="edit-${u.id}" aria-expanded="${!!edit}">${edit ? 'Done editing' : 'Edit'}</button>${u.reviewOnly ? chip('Review only', 'accent') : ''}${u.passedAt ? chip('Passed' + (u.passScore ? ' · ' + num(u.passScore) : ''), 'good') : up.built && up.total && up.done === up.total && !up.pending ? chip('Below pass mark · ' + up.avg, 'due') : ''}${u.kind === 'gaps' ? chip('Written by Claude, not in your course', 'added') : u.origin === 'added' ? chip('Added by Claude', 'added') : ''}</div></div>
       ${u.summary ? `<p class="small muted">${esc(u.summary)}</p>` : ''}${gate ? `<div class="small muted">Recommended after you pass the module before it. You can still start it now.</div>` : ''}
       ${up.total ? bar(100 * up.done / up.total) : ''}
-      ${(u.lessons || []).length ? `<ol class="lessons small">${u.lessons.map((l, n) => { const lid = u.id + 'L' + n; return `<li>${l.built ? `<a href="#learn-${lid}">${esc(l.title)}</a>` : `<span class="muted">${esc(l.title)}</span>`} ${!l.built ? chip('Not built yet') : l.depth === 'review' ? chip('Review cards only') : lessonDone(lid) ? chip('Done', 'good') : nx && nx.lid === lid ? chip('Next', 'accent') : ''}${(l.gaps || []).length ? ' ' + chip(plural(l.gaps.length, 'weak spot'), 'due') : ''}${l.known && !lessonDone(lid) ? ' ' + chip('Rated strong · saved for last') : ''}</li>`; }).join('')}</ol>` : '<span class="small muted">Topics are planned when you build this module.</span>'}
-      ${tasksHtml(u, u.id === openTasks)}
-      <div class="row">${up.pending || (!up.lessons && !(u.tasks || []).length) ? (aiOn() ? `<button class="btn sm ${isBusy(bkey) ? '' : 'primary'}" data-act="unit-build" data-uid="${u.id}" ${isBusy(bkey) ? 'disabled' : ''}>${up.built ? `Build ${plural(up.pending, 'new topic')}` : 'Build this module'}</button>` : needAI) : ''}${up.built ? `<a class="btn sm ghost" href="#guide-${u.id}">Study guide and audio recap</a>` : ''}</div>${busyHtml(bkey)}</div>`; }).join('')}</div>`
+      ${(u.lessons || []).length ? `<ol class="lessons small">${u.lessons.map((l, n) => { if (l.removed) return ''; const lid = u.id + 'L' + n; if (l.skip) return `<li><span class="muted">${esc(l.title)}</span> ${chip('Skipped')} <button type="button" class="linkbtn small" data-act="topic-skip" data-uid="${u.id}" data-n="${n}">Undo</button></li>`; return `<li>${l.built ? `<a href="#learn-${lid}">${esc(l.title)}</a>` : `<span class="muted">${esc(l.title)}</span>`} ${!l.built ? chip('Not built yet') : l.depth === 'review' ? chip('Review cards only') : lessonDone(lid) ? chip('Done', 'good') : nx && nx.lid === lid ? chip('Next', 'accent') : ''}${(l.gaps || []).length ? ' ' + chip(plural(l.gaps.length, 'weak spot'), 'due') : ''}${l.known && !lessonDone(lid) ? ' ' + chip('Rated strong · saved for last') : ''}</li>`; }).join('')}</ol>` : '<span class="small muted">Topics are planned when you build this module.</span>'}
+      ${edit ? unitEditHtml(u) : ''}${tasksHtml(u, u.id === openTasks)}
+      <div class="row">${up.pending || (!up.lessons && !(u.tasks || []).length) ? (aiOn() ? `<button class="btn sm ${isBusy(bkey) ? '' : 'primary'}" data-act="unit-build" data-uid="${u.id}" ${isBusy(bkey) ? 'disabled' : ''}>${up.built ? `Build ${plural(up.pending, 'new topic')}` : 'Build this module'}</button>` : needAI) : ''}${up.built ? `<a class="btn sm ghost" href="#guide-${u.id}">Study guide and audio recap</a><button type="button" class="btn sm ghost" data-act="unit-practice" data-uid="${u.id}">Practice this module</button>` : ''}</div>${busyHtml(bkey)}</div>`; }).join('')}</div>`
     : `<div class="empty stack"><b>This course is empty.</b><span>Paste what you have learned and Claude will file it into modules and topics, then teach and review it with you.</span><div><a class="btn primary" href="#add-${cid}">Add your first learning</a></div></div>`}
   ${log.length ? `<div class="stack tight"><h2>Recently added</h2><div class="panel list">${log.slice(0, 10).map(x => `<div class="row between"><span class="grow"><b>${esc(x.title)}</b><br><span class="small muted">${esc(x.summary || '')}</span></span><span class="small muted">${esc(x.day || '')}</span></div>`).join('')}</div></div>` : ''}</div>`;
 };
 Object.assign(ACT, {
   'unit-build': el => buildUnit(el.dataset.uid),
+  'unit-rename': el => { const t = L.str(el.value, 120), u = S.units[el.dataset.uid]; if (!u) return; if (!t) { el.value = u.title; return; } patch('units', el.dataset.uid, { title: t }).then(render, () => { }); },
+  'unit-delete': el => { const u = S.units[el.dataset.uid]; if (!u) return; confirmBox(`Delete "${u.title}"?`, 'Its topics, cards and review history are deleted. This can\'t be undone.', 'Delete module', async () => { UI.modal = null; await deleteUnit(el.dataset.uid); toast('Module deleted.'); render(); }); },
+  'unit-practice': el => { const uid = el.dataset.uid, u = S.units[uid]; if (!u) return;
+    const ids = cardsOf('unitId', uid).filter(c => c.status === 'active' && !offTopic(c) && (c.firstScore != null || (c.fsrs && (c.fsrs.reps || c.fsrs.due)))).sort((a, b) => num(a.createdAt) - num(b.createdAt)).slice(0, 30).map(c => c.id);
+    if (!ids.length) { toast('Finish a topic in this module first; then you can practice it any time.'); return; }
+    startSession({ kind: 'practice', title: 'Practice: ' + cut(u.title, 40), ids, mode: 'light', bucket: 'none', back: 'course-' + u.courseId }); },
+  'topic-rename': async el => { const uid = el.dataset.uid, n = +el.dataset.n, u = S.units[uid], t = L.str(el.value, 120); if (!u || !(u.lessons || [])[n]) return; if (!t) { el.value = u.lessons[n].title; return; }
+    await patch('units', uid, { lessons: u.lessons.map((l, k) => (k === n ? Object.assign({}, l, { title: t }) : l)) }).catch(() => { });
+    const lid = uid + 'L' + n, d = await getLesson(lid).catch(() => null); if (d) await putLesson(lid, Object.assign({}, d, { title: t })).catch(() => { }); render(); },
+  'topic-skip': async el => { const uid = el.dataset.uid, n = +el.dataset.n, u = S.units[uid]; if (!u || !(u.lessons || [])[n]) return; const on = !u.lessons[n].skip;
+    await patch('units', uid, { lessons: u.lessons.map((l, k) => (k === n ? Object.assign({}, l, { skip: on }) : l)) }).catch(() => { });
+    toast(on ? 'Topic skipped. Continue will pass over it, and it no longer counts toward the module.' : 'Topic is back in the course.'); await checkUnitPass(uid); render(); },
+  'topic-remove': el => { const uid = el.dataset.uid, n = +el.dataset.n, u = S.units[uid]; if (!u || !(u.lessons || [])[n]) return;
+    confirmBox(`Delete "${u.lessons[n].title}"?`, 'The topic disappears and its cards leave review. You can restore it from Edit on this module.', 'Delete topic', async () => {
+      UI.modal = null; const cur = S.units[uid]; if (!cur) return;
+      await patch('units', uid, { lessons: cur.lessons.map((l, k) => (k === n ? Object.assign({}, l, { removed: true }) : l)) }).catch(() => { });
+      for (const c of cardsOf('lessonId', uid + 'L' + n)) if (c.status !== 'retired') await patch('cards', c.id, { status: 'retired', removedWithTopic: true, statusBefore: c.status }).catch(() => { });
+      toast('Topic deleted.'); await checkUnitPass(uid); render(); }); },
+  'topic-restore': async el => { const uid = el.dataset.uid, n = +el.dataset.n, u = S.units[uid]; if (!u || !(u.lessons || [])[n]) return;
+    await patch('units', uid, { lessons: u.lessons.map((l, k) => (k === n ? Object.assign({}, l, { removed: false }) : l)) }).catch(() => { });
+    for (const c of cardsOf('lessonId', uid + 'L' + n)) if (c.removedWithTopic) await patch('cards', c.id, { status: c.statusBefore === 'flagged' ? 'flagged' : 'active', removedWithTopic: false }).catch(() => { });
+    toast('Topic restored.'); render(); },
   'task-tick': el => { const u = S.units[el.dataset.uid]; if (!u) return; const tasks = clone(L.arr(u.tasks, 12)), k = (tasks[+el.dataset.t] || { criteria: [] }).criteria[+el.dataset.c]; if (!k) return; k.done = el.checked; patch('units', el.dataset.uid, { tasks }).then(render, () => { }); },
   'fb-review': el => { const cid = el.dataset.cid, ids = list('cards').filter(k => k.fromFeedback && k.status === 'active' && (!cid || k.courseId === cid)).map(k => k.id).slice(0, 30); if (ids.length) startSession({ kind: 'feedback', title: 'Tutor feedback', ids, mode: 'review', bucket: 'extra', back: cid ? 'course-' + cid : 'home' }); },
   'course-skip-plan': async el => { await patch('courses', el.dataset.cid, { status: 'active', startedDay: today(), mix: Object.assign({}, S.courses[el.dataset.cid].mix, { own: true }) }).catch(() => { }); go('add-' + el.dataset.cid); },
   'course-mix-own': el => { const c = S.courses[el.dataset.cid]; patch('courses', el.dataset.cid, { mix: Object.assign({}, c.mix, { own: true }) }).then(render, () => { }); },
   'course-opt': el => { const cid = S.param, k = el.dataset.key, v = el.dataset.val; const cur = Object.assign({}, S.settings[cid] || {}); if (v === '') delete cur[k]; else cur[k] = k === 'retention' ? Number(v) : v; put('settings', cid, cur).then(render, () => { }); render(); },
   'course-field': el => { const cid = S.param, f = el.dataset.f; let v = el.value;
+    if (f === 'title') { const t = L.str(v, 120); if (!t) { el.value = S.courses[cid].title; return; } patch('courses', cid, { title: t }).then(render, () => { }); return; }
     if (f === 'goal') { patch('courses', cid, { goal: L.str(v, 200) }).then(render, () => { }); return; }
     if (f.startsWith('exam.')) { const k = f.slice(5), ex = Object.assign({}, S.courses[cid].exam || {}); if (k === 'questions' || k === 'minutes') { const n = Math.round(Number(v)); ex[k] = v.trim() && n >= 1 && n <= 600 ? n : null; } else ex[k] = L.str(v, k === 'style' ? 200 : 40); patch('courses', cid, { exam: ex }).then(render, () => { }); return; } if (f === 'minutesPerDay') { v = Math.round(Number(v)); if (!(v >= 5 && v <= 600)) { el.value = S.courses[cid].minutesPerDay; return; } } else if (v && !L.validDay(v)) return; patch('courses', cid, { [f]: v }).then(render, () => { }); },
   'course-delete': el => { const c = S.courses[el.dataset.cid]; if (!c) return; confirmBox(`Delete "${c.title}"?`, 'This deletes its units, lessons, cards, review history, tests and material. It can\'t be undone.', 'Delete course', async () => { UI.modal = null; go('courses'); await deleteCourse(el.dataset.cid); toast('Course deleted.'); render(); }); },
@@ -523,19 +558,21 @@ VIEWS.learn = lid => {
     ${ideas.length > 1 ? `<div class="dots" role="img" aria-label="Idea ${Math.min(st.i + 1, ideas.length)} of ${ideas.length}">${ideas.map((i, k) => { const c = tbOf(i); return `<button type="button" class="dot ${c && c.firstScore != null ? 'done' : ''} ${k === st.i && st.step !== 'done' ? 'cur' : ''}" data-act="learn-goto" data-i="${k}" aria-label="Idea ${k + 1}: ${esc(i.title)}"></button>`; }).join('')}</div>` : ''}${les.checked === false ? '<div class="flag small">The self-check pass did not run for this topic. Treat added content with care.</div>' : les.fixed ? `<div class="small muted">The self-check pass corrected ${plural(num(les.fixed), 'thing')} here before you saw it.</div>` : ''}</div>`;
   if (st.step === 'done') {
     const nextLid = n + 1 < unit.lessons.length && unit.lessons[n + 1].built ? uid + 'L' + (n + 1) : null, up = unitProgress(Object.assign({ id: uid }, unit));
-    return `<div class="reader">${head}<div class="panel stack"><h2>Lesson complete</h2><div class="list">${ideas.map((i, k) => { const c = tbOf(i) || {}; return `<div class="row between"><button class="linkbtn" data-act="learn-goto" data-i="${k}">${esc(i.title)}</button><span class="num">${c.firstScore == null ? '–' : num(L.passScoreOf(c))}</span></div>`; }).join('')}</div>
+    const left = ideas.filter(i => { const c = tbOf(i); return c && c.status !== 'retired' && c.firstScore == null; }).length;
+    return `<div class="reader">${head}<div class="panel stack"><h2>${left ? plural(left, 'idea') + ' not explained yet' : 'Lesson complete'}</h2><div class="list">${ideas.map((i, k) => { const c = tbOf(i) || {}; return `<div class="row between"><button class="linkbtn" data-act="learn-goto" data-i="${k}">${esc(i.title)}</button><span class="num">${c.firstScore == null ? '–' : num(L.passScoreOf(c))}</span></div>`; }).join('')}</div>
       <p class="small muted">Scores are your best first try at each teach-back (before any re-teach). Explain an idea again to raise it. The unit passes when the average reaches ${L.passMark(settingsFor(cid).strictness)}.${up.total && up.done === up.total ? ` Unit average so far: ${up.avg}.` : ''} Review cards for these ideas start tomorrow.</p>
-      <div class="row">${nextLid ? `<a class="btn primary" href="#learn-${nextLid}">Next lesson</a>` : `<a class="btn primary" href="#course-${cid}">Back to the course</a>`}<a class="btn" href="#guide-${uid}">Study guide</a></div></div></div>`;
+      <div class="row">${nextLid ? `<a class="btn primary" href="#learn-${nextLid}">Next lesson</a>` : `<a class="btn primary" href="#course-${cid}">Back to the course</a>`}<a class="btn" href="#guide-${uid}">Study guide</a><button type="button" class="btn ghost" data-act="learn-goto" data-i="0">Go through this topic again</button></div></div></div>`;
   }
   const idea = ideas[st.i], card = tbOf(idea);
   const title = `<div class="row between"><h2><span class="secno">${st.i + 1}/${ideas.length}</span>${esc(idea.title)}</h2>${speakBtn('idea-' + idea.id, 'Read aloud', ideaSpeech(idea))}</div>`;
   if (st.step === 'read' || !card) {
     const done = card && card.firstScore != null;
-    return `<div class="reader">${head}${title}${ideaHtml(idea, cid)}<div class="row sticky-cta">${!card ? '' : done ? `<button class="btn primary" data-act="learn-next">Next idea</button><button class="btn" data-act="learn-explain">Explain it again</button>` : `<button class="btn primary" data-act="learn-explain">I've read it: explain it back</button>`}
+    return `<div class="reader">${head}${title}${ideaHtml(idea, cid)}${card && aiOn() ? `<div class="row">${QUICK_ASKS.map(([l, q]) => `<button type="button" class="btn sm ghost" data-act="learn-quick" data-id="${esc(idea.id)}t" data-q="${esc(q)}">${l}</button>`).join('')}</div>` : ''}<div class="row sticky-cta">${st.i > 0 ? `<button type="button" class="btn ghost" data-act="learn-goto" data-i="${st.i - 1}">← Previous idea</button>` : ''}${!card ? '' : done ? `<button class="btn primary" data-act="learn-next">Next idea</button><button class="btn" data-act="learn-explain">Explain it again</button>` : `<button class="btn primary" data-act="learn-explain">I've read it: explain it back</button>`}
+      ${card && !done ? '<button type="button" class="btn ghost" data-act="learn-next">Skip this idea</button>' : ''}<button type="button" class="btn ghost sm" data-act="card-new" data-lid="${lid}" data-i="${st.i}">Add my own card</button>
       <button class="btn ghost sm" data-act="lesson-report" data-lid="${lid}" data-i="${st.i}">Report</button></div></div>`;
   }
   if (!UI.litem || UI.litem.cardId !== idea.id + 't' || !UI.litem.ctx.lesson) UI.litem = newItem(idea.id + 't', { lesson: true, mode: 'review', bucket: 'none', kind: 'lesson' });
-  return `<div class="reader">${head}${title}<details class="peek"><summary>Peek at the lesson</summary>${ideaHtml(idea, cid)}</details>${itemHtml(UI.litem)}</div>`;
+  return `<div class="reader">${head}${title}<div class="row"><button type="button" class="linkbtn small" data-act="learn-goto" data-i="${st.i}">← Back to the lesson</button><button type="button" class="linkbtn small" data-act="learn-next">Skip explaining this one</button></div><details class="peek"><summary>Peek at the lesson</summary>${ideaHtml(idea, cid)}</details>${itemHtml(UI.litem)}</div>`;
 };
 async function lessonAdvance(saved) {
   const st = UI.learn, les = st && S.lessons[st.lid]; if (!les) { render(); return; }
@@ -550,5 +587,6 @@ Object.assign(ACT, {
   'learn-explain': () => { UI.learn.step = 'explain'; UI.litem = null; Voice.stop(); render(); window.scrollTo(0, 0); },
   'learn-next': () => { const st = UI.learn, les = S.lessons[st.lid]; if (st.i + 1 < les.ideas.length) { st.i++; st.step = 'read'; } else st.step = 'done'; Voice.stop(); render(); window.scrollTo(0, 0); },
   'learn-goto': el => { UI.learn.i = +el.dataset.i; UI.learn.step = 'read'; UI.litem = null; Voice.stop(); render(); window.scrollTo(0, 0); },
+  'learn-quick': async el => { await openExplain(el.dataset.id, true); if (UI.ex) { UI.ex.ask = el.dataset.q; await ACT['ex-ask'](); } },
   'lesson-report': el => openModal('report', { lessonId: el.dataset.lid, idea: +el.dataset.i })
 });
