@@ -451,7 +451,7 @@ const L = (() => {
     const pr = raw.prompts && typeof raw.prompts === 'object' ? raw.prompts : {};
     const prompts = {}; for (const s of STYLES) prompts[s] = str(pr[s], 500);
     let cloze = null;
-    if (raw.cloze && str(raw.cloze.sentence) && str(raw.cloze.answer) && str(raw.cloze.sentence).toLowerCase().includes(str(raw.cloze.answer).toLowerCase())) cloze = { sentence: str(raw.cloze.sentence, 400), answer: str(raw.cloze.answer, 60) };
+    if (raw.cloze && str(raw.cloze.sentence) && str(raw.cloze.answer).length >= 4 && !STOP.has(str(raw.cloze.answer).toLowerCase()) && !/_{2,}/.test(str(raw.cloze.sentence)) && str(raw.cloze.sentence).toLowerCase().includes(str(raw.cloze.answer).toLowerCase())) cloze = { sentence: str(raw.cloze.sentence, 400), answer: str(raw.cloze.answer, 60) };
     return {
       title, analogy, mechanism, example, why: validatePart(raw.why), visual: validateVisual(raw.visual), visualOrigin: origin(raw.visualOrigin),
       quote: str(raw.quote, 600), keyPoints, prompts, hints: arr(raw.hints, 2).map(x => str(x, 300)).filter(Boolean), cloze,
@@ -490,13 +490,54 @@ const L = (() => {
   function validateIntake(raw) {
     raw = raw && typeof raw === 'object' ? raw : {};
     const placements = arr(raw.placements, 12).map(p => ({
-      unit: str(p && p.unit, 120), isNew: !!(p && p.isNew),
-      lessons: arr(p && p.lessons, 8).map(l => ({ title: str(l && l.title, 120), ideas: arr(l && l.ideas, 4).map(x => str(x, 160)).filter(Boolean), segs: arr(l && l.segs, 12).map(x => str(x, 60)).filter(Boolean) })).filter(l => l.title && l.ideas.length)
-    })).filter(p => p.unit && p.lessons.length);
-    const weakSpots = arr(raw.weakSpots, 12).map(w => ({ idea: str(w && w.idea, 160), unit: str(w && w.unit, 120), gap: str(w && w.gap, 500), quote: str(w && w.quote, 400), card: validateCard(w && w.card) })).filter(w => w.gap);
+      unit: str(p && p.unit, 120), isNew: !!(p && p.isNew), kind: p && p.kind === 'gaps' ? 'gaps' : 'course',
+      tasks: arr(p && p.tasks, 3).map(t => ({ title: str(t && t.title, 120) || 'Exercise', criteria: arr(t && t.criteria, 8).map(x => str(x, 500)).filter(Boolean) })).filter(t => t.criteria.length),
+      lessons: arr(p && p.lessons, 8).map(l => ({ title: str(l && l.title, 120), ideas: arr(l && l.ideas, 3).map(x => str(x, 160)).filter(Boolean), segs: arr(l && l.segs, 12).map(x => str(x, 60)).filter(Boolean) })).filter(l => l.title && l.ideas.length)
+    })).filter(p => p.unit && (p.lessons.length || p.tasks.length));
+    /* A tip on an answer the tutor already graded strong is not a weak spot. */
+    const weakSpots = arr(raw.weakSpots, 24).filter(w => !(w && w.kind === 'refinement')).map(w => ({ idea: str(w && w.idea, 160), unit: str(w && w.unit, 120), topic: str(w && w.topic, 120), gap: str(w && w.gap, 500), quote: str(w && w.quote, 400), card: validateCard(w && w.card) })).filter(w => w.gap);
     const skipped = arr(raw.skipped, 20).map(s => ({ idea: str(s && s.idea, 160), reason: str(s && s.reason, 200) })).filter(s => s.idea);
-    return { title: str(raw.title, 120), found: arr(raw.found, 6).map(x => str(x, 20)).filter(x => FOUND.includes(x)), placements, weakSpots, skipped, note: str(raw.note, 400) };
+    const glossary = arr(raw.glossary, 24).map(t => ({ term: str(t && t.term, 60), def: str(t && t.def, 400), fromSource: !!(t && t.fromSource) })).filter(t => t.term && t.def);
+    return { title: str(raw.title, 120), found: arr(raw.found, 6).map(x => str(x, 20)).filter(x => FOUND.includes(x)), profile: str(raw.profile, 1500), glossary, placements, weakSpots, skipped, note: str(raw.note, 400) };
   }
+  /* The self-check pass returns repairs, not just complaints. validateFixes cleans them; applyFixes applies what it
+     safely can and leaves the rest as flags on the idea or card. */
+  const FIX_TARGETS = ['mechanism', 'analogy', 'example', 'why', 'keyPoints', 'card'];
+  function validateFixes(raw, nIdeas) {
+    return arr(raw && (raw.fixes || raw.flags), 30).map(f => {
+      const idea = Number(f && f.idea); if (!Number.isInteger(idea) || idea < 0 || idea >= nIdeas) return null;
+      const card = Number.isInteger(f.card) ? f.card : null;
+      const target = FIX_TARGETS.includes(f.target) ? f.target : card != null ? 'card' : 'mechanism';
+      let example = null;
+      if (f.example && typeof f.example === 'object') { const steps = arr(f.example.steps, 8).map(s => ({ label: str(s && s.label, 120), text: str(s && s.text, 800) })).filter(s => s.text); if (steps.length) example = { title: str(f.example.title, 120) || 'Worked example', steps, result: str(f.example.result, 600) }; }
+      return { idea, target, card: target === 'card' ? card : null, problem: str(f.problem, 500), severity: f.severity === 'high' ? 'high' : 'low', action: ['relabel', 'replace', 'drop', 'flag'].includes(f.action) ? f.action : 'flag',
+        text: str(f.text, 3000), example, points: arr(f.points, 6).map(x => str(x, 300)).filter(Boolean),
+        cardFix: f.cardFix && typeof f.cardFix === 'object' ? { prompt: str(f.cardFix.prompt, 2000), answer: str(f.cardFix.answer, 2500), explanation: str(f.cardFix.explanation, 1200) } : null };
+    }).filter(f => f && f.problem);
+  }
+  function applyFixes(ideas0, fixes) {
+    const ideas = clone(ideas0), drop = {}; let applied = 0, open = 0;
+    for (const i of ideas) { i.flags = i.flags || []; i.cards = i.cards || []; }
+    for (const f of fixes) {
+      const i = ideas[f.idea], c = f.target === 'card' && f.card != null ? i.cards[f.card] : null; let ok = false;
+      if (f.action === 'relabel') { const part = c || i[f.target]; if (part && typeof part === 'object' && !Array.isArray(part)) { part.origin = 'added'; ok = true; } }
+      else if (f.action === 'replace') {
+        if (['mechanism', 'why', 'analogy'].includes(f.target) && f.text && i[f.target]) { i[f.target].text = f.text; ok = true; }
+        else if (f.target === 'example' && f.example) { i.example = Object.assign({}, f.example, { origin: i.example ? i.example.origin : 'added' }); ok = true; }
+        else if (f.target === 'keyPoints' && f.points.length >= 2) { i.keyPoints = f.points; ok = true; }
+        else if (c && f.cardFix && f.cardFix.prompt && f.cardFix.answer) { c.prompt = f.cardFix.prompt; c.answer = f.cardFix.answer; if (f.cardFix.explanation) c.explanation = f.cardFix.explanation; ok = true; }
+      } else if (f.action === 'drop') { if (c) { (drop[f.idea] = drop[f.idea] || new Set()).add(f.card); ok = true; } else if (f.target === 'analogy' && i.analogy) { i.analogy = null; ok = true; } }
+      if (ok) { applied++; continue; }
+      open++;
+      if (c) c.flag = f.problem; else i.flags.push({ problem: f.problem, severity: f.severity });
+    }
+    for (const k of Object.keys(drop)) ideas[k].cards = ideas[k].cards.filter((c, j) => !drop[k].has(j));
+    return { ideas, applied, open };
+  }
+  /* Two prompts that ask nearly the same thing: the later card is not added. */
+  /* Numbers are kept, so "step 1" and "step 2" are different questions. */
+  function dupTokens(s) { const t = tokens(s); for (const n of String(s || '').match(/\d+/g) || []) t.add(n); return t; }
+  function nearDuplicate(a, b) { const x = dupTokens(a), y = dupTokens(b); return x.size >= 3 && y.size >= 3 && overlap(x, y) >= 0.8; }
   /* Find the existing unit a planned placement belongs to: same title, or the same module number. */
   function matchUnit(title, units) {
     const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -546,7 +587,7 @@ const L = (() => {
     unitStatus, passScoreOf, pace, weakness, cramSelect, ideaLevel, examConfig, scoreTest, clozeMatch,
     accuracyBy, weakestIdeas, weekSummary, settingsFor,
     chunkText, splitSegments, tokens, overlap, slug, passageAround,
-    DEPTHS, FOUND, validateIntake, matchUnit, BUILD_MODELS, modelOpts,
+    DEPTHS, FOUND, validateIntake, validateFixes, applyFixes, nearDuplicate, matchUnit, BUILD_MODELS, modelOpts,
     str, arr, validateVisual, validatePart, validateCard, validateIdea, validateSyllabus, validateTestQ, ideaMarkdown, guideMarkdown
   };
 })();

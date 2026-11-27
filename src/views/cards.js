@@ -57,7 +57,7 @@ function itemHtml(it) {
   const card = S.cards[it.cardId];
   if (!card) return emptyBox('This item was removed.') + `<div class="row"><button type="button" class="btn" data-act="item-skip">Next</button></div>`;
   const course = S.courses[card.courseId] || {}, unit = S.units[card.unitId] || {};
-  const meta = `<div class="meta">${chip(TYPE_LABEL[card.type] || 'Card', 'type-' + card.type)}${course.title ? chip(course.title) : ''}${unit.title ? chip(unit.title) : ''}${card.origin === 'added' ? chip('Added by Claude', 'added') : ''}${card.mastered ? chip('Mastered check-in', 'good') : ''}${card.leech ? chip('Leech', 'bad') : ''}</div>`;
+  const meta = `<div class="meta">${chip(TYPE_LABEL[card.type] || 'Card', 'type-' + card.type)}${course.title ? chip(course.title) : ''}${unit.title ? chip(unit.title) : ''}${card.fromFeedback ? chip('Tutor feedback', 'due') : ''}${card.origin === 'added' ? chip('Added by Claude', 'added') : ''}${card.mastered ? chip('Mastered check-in', 'good') : ''}${card.leech ? chip('Leech', 'bad') : ''}</div>`;
   const body = card.type === 'teachback' ? tbHtml(it, card) : plainHtml(it, card);
   return `<div class="qcard" id="item">${meta}${body}</div>`;
 }

@@ -143,7 +143,7 @@ function renderNav() {
   const flagged = S.ready ? openReportCount() : 0;
   const item = ([k, l], withIcon) => `<a href="#${k}" ${cur === k ? 'aria-current="page"' : ''}>${withIcon ? icon(k) : ''}<span>${l}</span>${k === 'home' && q.unitsPlanned ? `<span class="count">${q.unitsPlanned}</span>` : ''}${k === 'progress' && flagged ? `<span class="count">${flagged}</span>` : ''}</a>`;
   $('#nav').innerHTML = NAV.map(n => item(n, false)).join('');
-  $('#tabbar').innerHTML = NAV.map(n => item(n, true)).join('');
+  $('#tabbar').innerHTML = NAV.map(n => item(n, true)).join('') + `<button type="button" data-act="tutor-open">${icon('chat')}<span>Tutor</span></button>`;
   const g = $('#gear'); if (g) g.setAttribute('aria-current', S.route === 'prefs' ? 'page' : 'false');
 }
 function renderBanner() {

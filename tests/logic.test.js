@@ -324,3 +324,39 @@ test('build model: tiers, named models and safe fallbacks', () => {
   assert.equal(L.settingsFor({ buildModel: 'complex' }).buildModel, 'complex'); assert.equal(L.settingsFor({ buildModel: 'x' }).buildModel, 'default'); assert.equal(L.settingsFor({ buildModelId: 7 }).buildModelId, '');
   assert.equal(L.settingsFor({}).buildModel, 'default'); assert.ok(L.BUILD_MODELS.every(m => m.label && m.hint && ['quick', 'default', 'complex'].includes(m.tier)));
 });
+
+test('intake v2: tasks, profile, glossary, refinements dropped', () => {
+  const p = L.validateIntake({ profile: 'You scored 5.0.', glossary: [{ term: 'golden test case', def: 'a known-correct example', fromSource: true }, { term: '', def: 'x' }],
+    placements: [{ unit: 'Module 1', kind: 'course', tasks: [{ title: 'Build the harness', criteria: ['Backup exists', ''] }, { title: 'empty', criteria: [] }], lessons: [] }, { unit: 'Gaps from your assessment', kind: 'gaps', lessons: [{ title: 'Hallucination', ideas: ['a', 'b', 'c', 'd'] }] }, { unit: 'Nothing', lessons: [], tasks: [] }],
+    weakSpots: [{ kind: 'refinement', idea: 'x', gap: 'go further' }, { kind: 'gap', idea: 'y', unit: 'Module 1', topic: 'T', gap: 'missed it', card: null }] });
+  assert.equal(p.profile, 'You scored 5.0.'); assert.equal(p.glossary.length, 1); assert.equal(p.placements.length, 2);
+  assert.equal(p.placements[0].tasks.length, 1); assert.deepEqual(p.placements[0].tasks[0].criteria, ['Backup exists']); assert.equal(p.placements[1].kind, 'gaps'); assert.equal(p.placements[1].lessons[0].ideas.length, 3);
+  assert.equal(p.weakSpots.length, 1); assert.equal(p.weakSpots[0].topic, 'T'); assert.equal(p.weakSpots[0].unit, 'Module 1');
+});
+test('self-check repairs: relabel, replace, drop, and what stays flagged', () => {
+  const ideas = [L.validateIdea({ title: 'A', analogy: 'like x', mechanism: { text: 'old text', origin: 'source' }, example: { steps: [{ text: 'bad step' }], result: 'r', origin: 'source' }, why: { text: 'w', origin: 'source' }, keyPoints: ['p1', 'p2'],
+    cards: [{ type: 'short', prompt: 'q0', answer: 'a0' }, { type: 'short', prompt: 'q1', answer: 'a1' }, { type: 'flash', prompt: 'q2', answer: 'a2' }] })];
+  const fixes = L.validateFixes({ fixes: [
+    { idea: 0, target: 'mechanism', problem: 'not in the material', action: 'relabel' },
+    { idea: 0, target: 'why', problem: 'wrong claim', action: 'replace', text: 'corrected why', severity: 'high' },
+    { idea: 0, target: 'example', problem: 'numbers do not follow', action: 'replace', example: { title: 'E', steps: [{ label: 'Suppose', text: 'fixed step' }], result: 'ok' } },
+    { idea: 0, target: 'keyPoints', problem: 'logistics', action: 'replace', points: ['k1', 'k2', 'k3'] },
+    { idea: 0, target: 'card', card: 0, problem: 'ambiguous', action: 'replace', cardFix: { prompt: 'better q', answer: 'better a' } },
+    { idea: 0, target: 'card', card: 1, problem: 'duplicate', action: 'drop' },
+    { idea: 0, target: 'card', card: 2, problem: 'cannot repair', action: 'flag' },
+    { idea: 0, target: 'analogy', problem: 'misleading', action: 'drop' },
+    { idea: 0, target: 'mechanism', problem: 'replace without text', action: 'replace' },
+    { idea: 5, target: 'why', problem: 'bad index', action: 'drop' }, { idea: 0, action: 'drop' }, 'junk' ] }, ideas.length);
+  assert.equal(fixes.length, 9);
+  const r = L.applyFixes(ideas, fixes), i = r.ideas[0];
+  assert.equal(i.mechanism.origin, 'added'); assert.equal(i.why.text, 'corrected why'); assert.equal(i.example.steps[0].text, 'fixed step'); assert.equal(i.example.origin, 'source');
+  assert.deepEqual(i.keyPoints, ['k1', 'k2', 'k3']); assert.equal(i.analogy, null);
+  assert.deepEqual(i.cards.map(c => c.prompt), ['better q', 'q2']); assert.equal(i.cards[1].flag, 'cannot repair'); assert.ok(!i.cards[0].flag);
+  assert.equal(r.applied, 7); assert.equal(r.open, 2); assert.equal(i.flags.length, 1); assert.equal(i.flags[0].problem, 'replace without text');
+  assert.equal(ideas[0].mechanism.origin, 'source', 'input is not mutated');
+  const legacy = L.validateFixes({ flags: [{ idea: 0, card: 1, problem: 'old style flag', severity: 'high' }] }, 1); assert.equal(legacy[0].action, 'flag'); assert.equal(legacy[0].target, 'card');
+  assert.deepEqual(L.validateFixes(null, 3), []);
+  assert.ok(L.nearDuplicate('What four things must a standalone document contain?', 'What four things must a standalone document contain')); assert.ok(!L.nearDuplicate('Why is self-checking circular?', 'What is a golden test case?')); assert.ok(!L.nearDuplicate('a b', 'a b'));
+  assert.equal(L.validateIdea({ title: 't', mechanism: 'm', keyPoints: ['a', 'b'], cloze: { sentence: 'This fails if ___.', answer: 'fails' } }).cloze, null);
+  assert.equal(L.validateIdea({ title: 't', mechanism: 'm', keyPoints: ['a', 'b'], cloze: { sentence: 'It is what it is.', answer: 'what' } }).cloze, null, 'stop words are not blanks');
+});

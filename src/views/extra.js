@@ -2,41 +2,23 @@
 const LEVEL_LABEL = { new: 'Not started', weak: 'Weak', learning: 'Getting there', strong: 'Strong', mastered: 'Mastered' };
 const cut = (s, n) => { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
 
-/* ---------- Mind map ---------- */
+/* ---------- Mind map: module, then topic, then idea, each idea colored by how well you know it ---------- */
 VIEWS.map = cid => {
   const c = S.courses[cid]; if (!c) return emptyBox('This course no longer exists.');
-  const us = unitsOf(cid), rows = [];
-  for (const u of us) {
-    const tb = tbCards(u.id).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
-    const ideas = tb.length ? tb.map(k => ({ id: k.ideaId, title: k.ideaTitle, level: L.ideaLevel(cardsOf('ideaId', k.ideaId)), lessonId: k.lessonId }))
-      : (u.lessons || []).flatMap(l => l.ideas).slice(0, 8).map((t, i) => ({ id: null, title: t, level: 'new', planned: true }));
-    rows.push({ u, ideas: ideas.length ? ideas : [{ id: null, title: 'Not planned yet', level: 'new', planned: true }] });
-  }
-  const RH = 34, W = 700; let y = 14; const parts = [];
-  const node = (x, yy, w, text, cls, attrs, sub) => `<g class="mnode ${cls}" ${attrs}><rect x="${x}" y="${yy}" width="${w}" height="26" rx="13"/><text x="${x + 12}" y="${yy + 17}">${esc(cut(text, Math.floor(w / 7.2)))}</text>${sub ? `<title>${esc(sub)}</title>` : ''}</g>`;
-  const mids = [];
-  for (const r of rows) {
-    const top = y, n = r.ideas.length, mid = top + (n * RH) / 2 - 17;
-    const pct = r.ideas.filter(i => i.level === 'strong' || i.level === 'mastered').length;
-    const ul = r.u.passedAt ? 'strong' : r.ideas.some(i => i.level === 'weak') ? 'weak' : r.ideas.some(i => i.level !== 'new') ? 'learning' : 'new';
-    mids.push(mid + 13);
-    r.ideas.forEach((i, k) => {
-      const iy = top + k * RH;
-      parts.push(`<path class="mlink" d="M370 ${mid + 13} C 400 ${mid + 13}, 400 ${iy + 13}, 430 ${iy + 13}"/>`);
-      parts.push(node(430, iy, 260, i.title, 'lv-' + i.level + (i.planned ? ' planned' : '') + (UI.mapSel === i.id && i.id ? ' sel' : ''), i.id ? `data-act="map-sel" data-id="${esc(i.id)}" tabindex="0" role="button" aria-label="${esc(i.title)}: ${LEVEL_LABEL[i.level]}"` : '', `${i.title}: ${i.planned ? 'not built yet' : LEVEL_LABEL[i.level]}`));
-    });
-    parts.push(node(160, mid, 210, r.u.title, 'unit lv-' + ul + (UI.mapSel === r.u.id ? ' sel' : ''), `data-act="map-sel" data-id="${esc(r.u.id)}" tabindex="0" role="button" aria-label="Unit ${esc(r.u.title)}"`, `${r.u.title}: ${pct} of ${n} ideas strong`));
-    y += n * RH + 12;
-  }
-  const H = Math.max(80, y + 6), cy = mids.length ? (mids[0] + mids[mids.length - 1]) / 2 : 40;
-  const links = mids.map(m => `<path class="mlink" d="M130 ${cy} C 145 ${cy}, 145 ${m}, 160 ${m}"/>`).join('');
-  const sel = UI.mapSel; let panel = '';
-  if (sel && S.units[sel]) { const u = S.units[sel], up = unitProgress(Object.assign({ id: sel }, u)); panel = `<div class="panel stack tight"><span class="eyebrow">Unit</span><h3>${esc(u.title)}</h3><p class="small muted">${up.built ? `${up.done} of ${up.total} ideas explained back${up.avg != null ? ` · average ${up.avg}` : ''}` : 'Not built yet'}</p><div class="row">${up.built ? `<a class="btn sm primary" href="#learn-${sel}L0">Open first lesson</a><a class="btn sm" href="#guide-${sel}">Study guide</a>` : `<a class="btn sm primary" href="#course-${cid}">Build it from the course page</a>`}</div></div>`; }
-  else if (sel) { const cs = cardsOf('ideaId', sel), tb = cs.find(k => k.type === 'teachback'); if (tb) panel = `<div class="panel stack tight"><span class="eyebrow">Idea · ${LEVEL_LABEL[L.ideaLevel(cs)]}</span><h3>${esc(tb.ideaTitle)}</h3><p class="small muted">${tb.lastScore == null ? 'Not explained back yet' : 'Last teach-back score ' + num(tb.lastScore)} · ${plural(cs.reduce((n, k) => n + (k.misses || 0), 0), 'miss', 'misses')}</p><div class="row"><a class="btn sm primary" href="#learn-${esc(tb.lessonId)}" data-ideajump="${esc(sel)}">Open the lesson</a>${cs.some(k => k.status === 'active' && k.fsrs && k.fsrs.reps) ? `<button class="btn sm" data-act="map-review" data-id="${esc(sel)}">Review this idea</button>` : ''}<button class="btn sm ghost" data-act="map-master" data-id="${esc(sel)}">${tb.mastered ? 'Un-master' : 'Mark mastered'}</button></div></div>`; }
-  return `<div class="stack-lg">${backLink('course-' + cid, c.title)}<div class="stack"><h1>Mind map</h1><p class="muted">Every unit and idea, colored by how well you know it. Tap one to open its lesson or review it.</p></div>
+  const us = unitsOf(cid), sel = UI.mapSel;
+  const dot = (lv, title, id) => id ? `<button type="button" class="mnode lv-${lv} ${sel === id ? 'sel' : ''}" data-act="map-sel" data-id="${esc(id)}" aria-label="${esc(title)}: ${LEVEL_LABEL[lv]}"><i></i><span>${esc(title)}</span></button>` : `<span class="mnode planned lv-new"><i></i><span>${esc(title)}</span></span>`;
+  const mods = us.map(u => {
+    const tb = tbCards(u.id), strong = tb.filter(k => ['strong', 'mastered'].includes(L.ideaLevel(cardsOf('ideaId', k.ideaId)))).length;
+    const topics = (u.lessons || []).map((l, n) => { const lid = u.id + 'L' + n, mine = tb.filter(k => k.lessonId === lid).sort((x, y) => (x.createdAt || 0) - (y.createdAt || 0));
+      return `<div class="mtopic"><span class="small mtitle">${l.built ? `<a href="#learn-${lid}">${esc(l.title)}</a>` : esc(l.title) + ' ' + chip('Not built yet')}</span><div class="mideas">${mine.length ? mine.map(k => dot(L.ideaLevel(cardsOf('ideaId', k.ideaId)), k.ideaTitle, k.ideaId)).join('') : (l.ideas || []).map(x => dot('new', x, null)).join('')}</div></div>`; }).join('');
+    return `<div class="mmod"><button type="button" class="mnode unit ${sel === u.id ? 'sel' : ''}" data-act="map-sel" data-id="${esc(u.id)}"><b>${esc(u.title)}</b><span class="small muted">${tb.length ? `${strong} of ${plural(tb.length, 'idea')} strong` : 'Not built yet'}</span></button><div class="mtopics">${topics || '<span class="small muted">No topics yet.</span>'}</div></div>`;
+  }).join('');
+  let panel = '';
+  if (sel && S.units[sel]) { const u = S.units[sel], up = unitProgress(Object.assign({ id: sel }, u)); panel = `<div class="panel stack tight"><span class="eyebrow">Module</span><h3>${esc(u.title)}</h3><p class="small muted">${up.built ? `${up.done} of ${up.total} ideas explained back${up.avg != null ? ` · average ${up.avg}` : ''}` : 'Not built yet'}</p><div class="row">${up.built ? `<a class="btn sm primary" href="#learn-${sel}L0">Open first topic</a><a class="btn sm" href="#guide-${sel}">Study guide</a>` : `<a class="btn sm primary" href="#course-${cid}">Build it from the course page</a>`}</div></div>`; }
+  else if (sel) { const cs = cardsOf('ideaId', sel), tb = cs.find(k => k.type === 'teachback'); if (tb) panel = `<div class="panel stack tight"><span class="eyebrow">Idea · ${LEVEL_LABEL[L.ideaLevel(cs)]}</span><h3>${esc(tb.ideaTitle)}</h3><p class="small muted">${tb.lastScore == null ? 'Not explained back yet' : 'Last teach-back score ' + num(tb.lastScore)} · ${plural(cs.reduce((n, k) => n + (k.misses || 0), 0), 'miss', 'misses')}</p><div class="row"><a class="btn sm primary" href="#learn-${esc(tb.lessonId)}">Open the topic</a>${cs.some(k => k.status === 'active' && k.fsrs && k.fsrs.reps) ? `<button class="btn sm" data-act="map-review" data-id="${esc(sel)}">Review this idea</button>` : ''}<button class="btn sm ghost" data-act="map-master" data-id="${esc(sel)}">${tb.mastered ? 'Un-master' : 'Mark mastered'}</button></div></div>`; }
+  return `<div class="stack-lg">${backLink('course-' + cid, c.title)}<div class="stack"><h1>Mind map</h1><p class="muted">Every module, topic and idea, colored by how well you know it. Tap one to open or review it.</p></div>
   <div class="legend">${Object.entries(LEVEL_LABEL).map(([k, l]) => `<span class="lg lv-${k}"><i></i>${l}</span>`).join('')}</div>
-  ${us.length ? `<div class="mapwrap"><svg class="mindmap" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="group" aria-label="Course mind map">${links}${parts.filter(p => p.startsWith('<path')).join('')}${node(8, cy - 13, 122, c.title, 'root', '', c.title)}${parts.filter(p => !p.startsWith('<path')).join('')}</svg></div>` : emptyBox('No units yet.')}
-  ${panel}</div>`;
+  ${panel}${us.length ? `<div class="mindmap stack">${mods}</div>` : emptyBox('No modules yet.')}</div>`;
 };
 Object.assign(ACT, {
   'map-sel': el => { UI.mapSel = UI.mapSel === el.dataset.id ? null : el.dataset.id; render(); },
@@ -207,6 +189,7 @@ VIEWS.home = () => {
         ${nx && !nx.build ? `<a class="btn sm primary" href="#learn-${nx.lid}">Continue</a>` : `<a class="btn sm" href="#course-${c.id}">Open</a>`}</div>`; }).join('')}</div>` : '<p class="small muted">No active course yet.</p>'}
       ${setup.length ? `<div class="panel list">${setup.map(c => `<div class="row between"><span class="grow">${esc(c.title)}</span><a class="btn sm" href="#course-${c.id}">Finish setup</a></div>`).join('')}</div>` : ''}</div>
   </div><div class="stack">
+    ${feedbackRow('')}
     <div class="panel stack"><h3>Weak spots</h3>${weak.length ? `<div class="list">${weak.map(i => `<div><b>${esc(i.title || 'Idea')}</b><div class="small muted">${esc((S.units[i.unitId] || {}).title || '')}</div></div>`).join('')}</div><a class="small" href="#notebook">Open the mistake notebook</a>` : '<p class="small muted">Ideas you keep missing show here.</p>'}</div>
     ${inbox ? `<div class="panel row between"><div class="grow"><b>${plural(inbox, 'item')} from chat</b><div class="small muted">Waiting under Add learning, "From chat".</div></div><a class="btn sm" href="#add">Open</a></div>` : ''}
     ${open ? `<div class="panel row between"><div class="grow"><b>${plural(open, 'flagged item')}</b><div class="small muted">Waiting for your look.</div></div><a class="btn sm" href="#reports">Reports</a></div>` : ''}
