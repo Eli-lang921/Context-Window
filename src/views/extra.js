@@ -218,7 +218,7 @@ VIEWS.more = () => VIEWS.weekly();
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 VIEWS.prefs = () => {
   const g = settingsFor(), bk = ui('bk', () => ({ erase: false, file: null, note: '' }));
-  return `<div class="reader stack-lg">${backLink('home', 'Today')}<div class="stack"><h1>Settings</h1><p class="muted">Defaults for every course. A course can override strictness, probing and retention on its Options tab.</p></div>
+  return `<div class="reader stack-lg">${backLink('home', 'Today')}<div class="stack"><h1>Settings</h1><p class="muted">Defaults for every course. A course can override strictness, probing and retention under its More tools, Course options.</p></div>
   <div class="panel stack"><h3>Teach-back</h3>
     <div class="field"><span>Probing depth</span>${seg('probing', PROBING, g.probing, 'pref')}<span class="small muted">How many follow-up questions before scoring. Deep adds edge cases and "why" chains.</span></div>
     <div class="field"><span>Grading strictness</span>${seg('strictness', STRICTNESS, g.strictness, 'pref')}<span class="small muted">Pass mark for a unit: lenient 60, standard 70, strict 80.</span></div></div>

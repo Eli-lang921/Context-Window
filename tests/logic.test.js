@@ -310,5 +310,6 @@ test('add learning: intake plan validation and unit matching', () => {
   assert.equal(L.matchUnit('module 2: prompting', units), 'b'); assert.equal(L.matchUnit('Module 2 - Advanced prompts', units), 'b', 'same module number joins the existing module');
   assert.equal(L.matchUnit('AGENTS', units), 'c'); assert.equal(L.matchUnit('Module 3: Tools', units), null); assert.equal(L.matchUnit('Evaluation', units), null); assert.equal(L.matchUnit('', units), null);
   assert.equal(L.matchUnit('Module 12', [{ id: 'x', title: 'Module 1' }]), null, 'module 12 is not module 1');
+  assert.equal(L.matchUnit('Prompting part 2', [{ id: 'x', title: 'Agents part 2' }]), null, 'a shared "part 2" does not join unrelated modules');
   assert.deepEqual(L.DEPTHS, ['refresher', 'full', 'review']);
 });

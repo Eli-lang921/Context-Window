@@ -483,7 +483,7 @@ const L = (() => {
     const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
     const t = norm(title); if (!t) return null;
     const exact = units.find(u => norm(u.title) === t); if (exact) return exact.id;
-    const modNo = s => { const m = /\b(?:module|unit|week|chapter|lesson|part)\s+(\d+)\b/.exec(norm(s)); return m ? m[0].replace(/\s+/g, ' ') : null; };
+    const modNo = s => { const m = /\b(?:module|unit|week|chapter)\s+(\d+)\b/.exec(norm(s)); return m ? m[0].replace(/\s+/g, ' ') : null; };
     const n = modNo(title); if (!n) return null;
     const same = units.find(u => modNo(u.title) === n);
     return same ? same.id : null;

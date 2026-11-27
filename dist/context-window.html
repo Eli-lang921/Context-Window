@@ -788,7 +788,7 @@ const L = (() => {
     const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
     const t = norm(title); if (!t) return null;
     const exact = units.find(u => norm(u.title) === t); if (exact) return exact.id;
-    const modNo = s => { const m = /\b(?:module|unit|week|chapter|lesson|part)\s+(\d+)\b/.exec(norm(s)); return m ? m[0].replace(/\s+/g, ' ') : null; };
+    const modNo = s => { const m = /\b(?:module|unit|week|chapter)\s+(\d+)\b/.exec(norm(s)); return m ? m[0].replace(/\s+/g, ' ') : null; };
     const n = modNo(title); if (!n) return null;
     const same = units.find(u => modNo(u.title) === n);
     return same ? same.id : null;
@@ -957,11 +957,12 @@ Module the learner named for this paste: ${moduleHint ? `"${moduleHint}"` : 'not
 ${JSON_ONLY}
 Return {"title":"a short name for this paste","found":["lesson" | "notes" | "answers" | "feedback" | "chat"],
 "placements":[{"unit":"","isNew":false,"lessons":[{"title":"one topic","ideas":["one key idea, as a short phrase"],"segs":["refs of the segments that teach it"]}]}],
-"weakSpots":[{"idea":"the idea it concerns","gap":"what the feedback said the learner got wrong, missed or should improve, in one or two plain sentences","quote":"the feedback's own words, copied exactly, under 30 words","card":{"type":"short" | "apply" | "flash","prompt":"a question that tests exactly this gap","answer":"","rubric":["1-3 points"],"explanation":"2 sentences","origin":"source","difficulty":3}}],
+"weakSpots":[{"idea":"the idea it concerns","gap":"what the feedback said the learner got wrong, missed or should improve, in one or two plain sentences","quote":"the feedback's own words, copied exactly, under 30 words","card":{"type":"short" | "apply" | "flash","prompt":"a question that tests exactly this gap","answer":"the model answer (never empty)","rubric":["1-3 points"],"explanation":"2 sentences","origin":"source","difficulty":3}}],
 "skipped":[{"idea":"","reason":"already covered in <unit>"}],
 "note":"one sentence on anything the learner should know about this plan, or empty"}
 Rules:
 - A unit is one module of the course; a lesson is one topic inside it, with 1-3 key ideas. Plan only what the paste actually teaches.
+- Limits: at most 12 units, 8 lessons per unit, 12 weak spots and 20 skipped ideas. Merge closely related topics rather than exceed them.
 - unit: when the content belongs to a unit in EXISTING UNITS, copy that unit's title exactly and set isNew false. Otherwise give a new unit title and set isNew true; when the module is known, start the title with it (for example "Module 3: Tool use").
 - Teachable content is what the lesson, tutor or notes state. The learner's own answers are not facts to teach; use them only with the feedback, to find gaps.
 - weakSpots: only from explicit feedback, corrections or grades in the paste that say the learner got something wrong, left something out or should improve. One entry per distinct gap. Ignore praise. Never invent a gap. Empty array when the paste has no such feedback.
@@ -1873,13 +1874,15 @@ async function checkDayDone() {
 }
 async function checkUnitPass(unitId) {
   const unit = S.units[unitId]; if (!unit || unit.passedAt) return;
+  if ((unit.lessons || []).some(l => !l.built)) return;
   const st = L.unitStatus(cardsOf('unitId', unitId).filter(c => c.type === 'teachback' && c.status !== 'retired'), settingsFor(unit.courseId).strictness);
   if (!st.passed) return;
   const first = !unit.passCounted;
   await patch('units', unitId, { passedAt: Date.now(), passScore: st.avg, passCounted: true }).catch(() => { });
   const all = unitsOf(unit.courseId), courseDone = all.length > 0 && all.every(u => u.passedAt || u.id === unitId);
-  if (courseDone && S.courses[unit.courseId] && !S.courses[unit.courseId].doneAt) await patch('courses', unit.courseId, { doneAt: Date.now() }).catch(() => { });
-  if (first) await bumpMeta((m, day) => { m.stats.unitsPassed++; addXp(m, day, L.xpFor({ kind: 'unitPass' })); if (courseDone) m.stats.coursesDone++; });
+  const course = S.courses[unit.courseId], firstDone = courseDone && course && !course.doneCounted;
+  if (courseDone && course && !course.doneAt) await patch('courses', unit.courseId, { doneAt: Date.now(), doneCounted: true }).catch(() => { });
+  if (first || firstDone) await bumpMeta((m, day) => { if (first) { m.stats.unitsPassed++; addXp(m, day, L.xpFor({ kind: 'unitPass' })); } if (firstDone) m.stats.coursesDone++; });
   toast(`Module passed: ${unit.title} (${st.avg}).`);
 }
 /* Pull every card of an idea (or a unit, when the idea is unknown) earlier after a miss in a test or game. */
@@ -2159,7 +2162,9 @@ async function openExplain(cardId, askFirst) {
   UI.ex = { cardId, passage: '', explain: null, answer: null, image: null, ask: '', askFirst };
   openModal('explain', {});
   const unit = S.units[card.unitId];
-  if (unit && card.quote) { try { UI.ex.passage = L.passageAround(await unitMaterial(unit, 200000), card.quote); } catch (e) { } if (UI.modal && UI.modal.kind === 'explain') render(); }
+  const lm = /^(.+)L(\d+)$/.exec(card.lessonId || ''), les = lm && unit && (unit.lessons || [])[+lm[2]];
+  const segs = les && les.segs && les.segs.length ? les.segs : les && les.sid && S.sources[les.sid] ? Array.from({ length: num(S.sources[les.sid].segCount) }, (_, i) => les.sid + ':' + i) : unit ? unit.segs : null;
+  if (segs && card.quote) { try { UI.ex.passage = L.passageAround(await unitMaterial({ segs }, 200000), card.quote); } catch (e) { } if (UI.modal && UI.modal.kind === 'explain') render(); }
 }
 MODALS.explain = () => {
   const x = UI.ex, card = S.cards[x.cardId]; if (!card) return '<p>This item was removed.</p>';
@@ -2305,7 +2310,7 @@ VIEWS.courses = () => {
   return `<div class="stack-lg"><div class="row between"><h1>Courses</h1><a class="btn primary" href="#newcourse">New course</a></div>
   ${cs.length ? `<div class="grid">${cs.map(c => { const us = unitsOf(c.id), passed = us.filter(u => u.passedAt).length; return `<a class="panel deck" href="#course-${c.id}"><div class="row between"><h3>${esc(c.title)}</h3>${c.status === 'active' ? paceChip(c) : chip(c.status === 'syllabus' ? 'Syllabus to review' : 'Setting up', 'due')}</div>
     <p class="small muted clamp2">${esc(c.goal || '')}</p>${bar(us.length ? 100 * passed / us.length : 0, 'good')}<div class="stats"><span><b>${passed}</b> of ${us.length} units passed</span><span><b>${cardsOf('courseId', c.id).filter(x => L.isDue(x, today())).length}</b> due</span></div></a>`; }).join('')}</div>`
-    : emptyBox('No courses yet. A course starts from a goal, such as passing an exam. Claude drafts the syllabus and you edit it before anything is built.')}</div>`;
+    : emptyBox('No courses yet. Name one and start adding what you learn; Claude files each addition into modules and topics.')}</div>`;
 };
 
 /* ---------- New course: a name is enough; everything else is optional ---------- */
@@ -2378,7 +2383,7 @@ function materialPanel(cid, mode = 'full') {
   UI.matMode = mode;
   const srcs = cid ? list('sources').filter(s => s.courseId === cid).sort((a, b) => a.createdAt - b.createdAt) : [];
   const inbox = inboxGroups(), g = settingsFor(), key = 'mat-' + cid;
-  const listHtml = srcs.length ? `<div class="list">${srcs.map(s => `<div class="row between"><div class="grow"><b>${esc(s.title)}</b>${s.staged ? ' ' + chip('Not filed yet', 'due') : ''}<div class="small muted">${esc(KIND_LABEL[s.kind] || 'Material')} · ${num(s.chars).toLocaleString()} characters${num(s.segCount) > 1 ? ` · split into ${num(s.segCount)} ordered parts` : ''}</div></div><button class="btn sm ghost" data-act="mat-del" data-sid="${s.id}">Remove</button></div>`).join('')}</div>` : '<p class="small muted">No sources yet.</p>';
+  const listHtml = srcs.length ? `<div class="list">${srcs.map(s => `<div class="row between"><div class="grow"><b>${esc(s.title)}</b>${s.staged ? ' ' + chip('Not filed yet', 'due') : ''}<div class="small muted">${esc(KIND_LABEL[s.kind] || 'Material')} · ${num(s.chars).toLocaleString()} characters${num(s.segCount) > 1 ? ` · split into ${num(s.segCount)} ordered parts` : ''}</div></div><div class="row">${s.staged && S.courses[cid] && S.courses[cid].status === 'active' ? `<button class="btn sm" data-act="mat-replan" data-sid="${s.id}">Plan it</button>` : ''}<button class="btn sm ghost" data-act="mat-del" data-sid="${s.id}">Remove</button></div></div>`).join('')}</div>` : '<p class="small muted">No sources yet.</p>';
   if (mode === 'list') return `<div class="panel stack" id="material"><div class="row between"><h3>Sources</h3><span class="small muted">${plural(srcs.length, 'source')}</span></div>${listHtml}<p class="small muted">Removing a source keeps the lessons already built from it.</p></div>`;
   const tabs = [['paste', mode === 'add' ? 'Type or paste' : 'Paste'], ['file', 'File'], ['photo', 'Photos'], ['chat', `From chat${inbox.length ? ` (${inbox.length})` : ''}`]].filter(([k]) => k !== 'paste' || mode === 'add' || g.sources.paste !== false).concat(connList().map(k => [k, CONNECTORS[k].label]), [['link', 'Web or YouTube']]);
   if (!tabs.some(t => t[0] === m.tab)) m.tab = tabs[0][0];
@@ -2412,6 +2417,7 @@ async function matAdd(cid, src) {
   render(); return sid;
 }
 Object.assign(ACT, {
+  'mat-replan': async el => { const sid = el.dataset.sid, s = S.sources[sid]; if (!s) return; const text = await loadSourceText(sid); UI.add = { cid: s.courseId, picked: s.courseId, newName: '', module: '', depth: 'refresher', title: s.title, text, kind: s.kind || 'notes', plan: null, sid, sidText: text.trim(), inboxIds: [] }; go('add-' + s.courseId); },
   'mat-add-paste': el => matAdd(el.dataset.cid, { title: UI.mat.title, kind: 'notes', text: UI.mat.text }),
   'mat-file': async el => {
     const f = el.files && el.files[0], cid = el.dataset.cid; if (!f) return;
@@ -2501,7 +2507,7 @@ VIEWS.syllabus = cid => {
     ${(u.lessons || []).length ? `<ol class="small lessons">${u.lessons.map(l => `<li><b>${esc(l.title)}</b>${l.ideas.length ? `<span class="muted">: ${l.ideas.map(esc).join('; ')}</span>` : ''}</li>`).join('')}</ol>` : '<span class="small muted">Lessons are planned when you build this unit.</span>'}</div>`).join('') || emptyBox('No units yet.')}</div>
   <div class="panel stack"><h3>Add a unit</h3><div class="row nowrap">${textIn('newunit', ui('newunit', ''), 'placeholder="Unit title" maxlength="120"')}<button class="btn" data-act="unit-add" data-cid="${cid}">Add</button></div></div>
   <div class="row">${c.status !== 'active' ? `<button class="btn primary" data-act="syl-approve" data-cid="${cid}" ${us.length ? '' : 'disabled'}>Approve syllabus</button>` : `<a class="btn primary" href="#course-${cid}">Done</a>`}
-  ${aiOn() ? `<button class="btn" data-act="syl-draft" data-cid="${cid}" ${isBusy(key) ? 'disabled' : ''}>Draft again</button>` : ''}</div>${us.some(u => u.status === 'ready') ? '<p class="small muted">Drafting again keeps units you have already built.</p>' : ''}${busyHtml(key)}</div>`;
+  ${aiOn() && c.status !== 'active' ? `<button class="btn" data-act="syl-draft" data-cid="${cid}" ${isBusy(key) ? 'disabled' : ''}>Draft again</button>` : ''}</div>${c.status !== 'active' && us.some(u => u.status === 'ready') ? '<p class="small muted">Drafting again keeps modules you have already built.</p>' : ''}${busyHtml(key)}</div>`;
 };
 Object.assign(ACT, {
   'syl-draft': el => draftSyllabus(el.dataset.cid),
@@ -2555,7 +2561,7 @@ async function unitMaterialSmart(unit) {
 }
 async function buildUnit(uid) {
   const key = 'build-' + uid;
-  await task(key, 'Planning the module…', async signal => {
+  return task(key, 'Planning the module…', async signal => {
     let unit = Object.assign({ id: uid }, S.units[uid]); const c = S.courses[unit.courseId], cid = unit.courseId;
     const material = c.mix.own ? await unitMaterialSmart(unit) : '';
     const label = t => { if (S.busy[key]) { S.busy[key].label = t; render(); } };
@@ -2573,7 +2579,9 @@ async function buildUnit(uid) {
       if (have) { prior.push(...have.ideas.map(i => i.title)); if (!les.built) await markBuilt(n); continue; }
       const depth = L.DEPTHS.includes(les.depth) ? les.depth : 'full', early = unit.reviewOnly || depth === 'review';
       /* A topic added through Add learning carries its own source segments; older ones draw on the module's. */
-      const lesMat = !c.mix.own ? '' : (les.segs && les.segs.length ? await unitMaterial({ segs: les.segs }) : material);
+      let lesSegs = les.segs && les.segs.length ? les.segs : null;
+      if (!lesSegs && les.sid && S.sources[les.sid]) lesSegs = Array.from({ length: num(S.sources[les.sid].segCount) }, (_, i) => les.sid + ':' + i);
+      const lesMat = lesSegs ? await unitMaterial({ segs: lesSegs }) : material;
       label(`Writing topic ${n + 1} of ${N}: ${les.title}`);
       const raw = await ai(P.lesson({ course: c, unit, lesson: les.ideas.length ? les : { title: les.title, ideas: [les.title] }, prior, material: lesMat, mix: c.mix, depth }), { signal });
       const ideas = L.arr(raw && raw.ideas, 5).map(L.validateIdea).filter(Boolean);
@@ -2637,6 +2645,9 @@ VIEWS.course = cid => {
       <div class="field"><span>Target retention</span>${seg('retention', [['', 'Default'], ['0.85', '85%'], ['0.9', '90%'], ['0.93', '93%'], ['0.95', '95%']], ov.retention ? String(ov.retention) : '', 'course-opt')}</div>
       <div class="row top">${field('Minutes per day', `<input type="text" id="co-min" value="${esc(c.minutesPerDay)}" inputmode="numeric" maxlength="3" data-act-change="course-field" data-f="minutesPerDay" style="max-width:8em">`)}${field('Target date', `<input type="date" id="co-dl" value="${esc(c.deadline || '')}" data-act-change="course-field" data-f="deadline">`)}</div>
       <p class="small muted">Pass mark for a module: ${L.passMark(cfg.strictness)}.</p></div>
+      <div class="panel stack"><h3>About this course</h3>${field('What you want from it', `<input type="text" id="co-goal" value="${esc(c.goal || '')}" maxlength="200" data-act-change="course-field" data-f="goal">`)}
+      <div class="row top">${field('Exam questions', `<input type="text" id="co-exq" value="${esc((c.exam || {}).questions || '')}" inputmode="numeric" maxlength="3" data-act-change="course-field" data-f="exam.questions">`)}${field('Exam minutes', `<input type="text" id="co-exm" value="${esc((c.exam || {}).minutes || '')}" inputmode="numeric" maxlength="3" data-act-change="course-field" data-f="exam.minutes">`)}${field('Passing score', `<input type="text" id="co-exp" value="${esc((c.exam || {}).passing || '')}" maxlength="40" data-act-change="course-field" data-f="exam.passing">`)}</div>
+      ${field('Exam question style', `<input type="text" id="co-exs" value="${esc((c.exam || {}).style || '')}" maxlength="200" data-act-change="course-field" data-f="exam.style">`)}</div>
       <div class="row"><button class="btn ghost danger" data-act="course-delete" data-cid="${cid}">Delete course</button></div>`}</div>`;
   }
   const tools = [[`#test-${cid}`, 'Practice test', 'Quick test or full exam simulation'], [`#games-${cid}`, 'Games', 'Match, fill the blank, speed round, quiz board'], [`#cram-${cid}`, 'Cram mode', 'High-yield review before a deadline'],
@@ -2655,14 +2666,16 @@ VIEWS.course = cid => {
       ${(u.lessons || []).length ? `<ol class="lessons small">${u.lessons.map((l, n) => { const lid = u.id + 'L' + n; return `<li>${l.built ? `<a href="#learn-${lid}">${esc(l.title)}</a>` : `<span class="muted">${esc(l.title)}</span>`} ${!l.built ? chip('Not built yet') : l.depth === 'review' ? chip('Review cards only') : lessonDone(lid) ? chip('Done', 'good') : ''}</li>`; }).join('')}</ol>` : '<span class="small muted">Topics are planned when you build this module.</span>'}
       <div class="row">${up.pending || !up.lessons ? (aiOn() ? `<button class="btn sm ${isBusy(bkey) ? '' : 'primary'}" data-act="unit-build" data-uid="${u.id}" ${isBusy(bkey) ? 'disabled' : ''}>${up.built ? `Build ${plural(up.pending, 'new topic')}` : 'Build this module'}</button>` : needAI) : ''}${up.built ? `<a class="btn sm ghost" href="#guide-${u.id}">Study guide and audio recap</a>` : ''}</div>${busyHtml(bkey)}</div>`; }).join('')}</div>`
     : `<div class="empty stack"><b>This course is empty.</b><span>Paste what you have learned and Claude will file it into modules and topics, then teach and review it with you.</span><div><a class="btn primary" href="#add-${cid}">Add your first learning</a></div></div>`}
-  ${log.length ? `<div class="stack tight"><h2>Recently added</h2><div class="panel list">${log.slice(0, 5).map(x => `<div class="row between"><span class="grow"><b>${esc(x.title)}</b><br><span class="small muted">${esc(x.summary || '')}</span></span><span class="small muted">${esc(x.day || '')}</span></div>`).join('')}</div></div>` : ''}</div>`;
+  ${log.length ? `<div class="stack tight"><h2>Recently added</h2><div class="panel list">${log.slice(0, 10).map(x => `<div class="row between"><span class="grow"><b>${esc(x.title)}</b><br><span class="small muted">${esc(x.summary || '')}</span></span><span class="small muted">${esc(x.day || '')}</span></div>`).join('')}</div></div>` : ''}</div>`;
 };
 Object.assign(ACT, {
   'unit-build': el => buildUnit(el.dataset.uid),
   'course-skip-plan': async el => { await patch('courses', el.dataset.cid, { status: 'active', startedDay: today(), mix: Object.assign({}, S.courses[el.dataset.cid].mix, { own: true }) }).catch(() => { }); go('add-' + el.dataset.cid); },
   'course-mix-own': el => { const c = S.courses[el.dataset.cid]; patch('courses', el.dataset.cid, { mix: Object.assign({}, c.mix, { own: true }) }).then(render, () => { }); },
   'course-opt': el => { const cid = S.param, k = el.dataset.key, v = el.dataset.val; const cur = Object.assign({}, S.settings[cid] || {}); if (v === '') delete cur[k]; else cur[k] = k === 'retention' ? Number(v) : v; put('settings', cid, cur).then(render, () => { }); render(); },
-  'course-field': el => { const cid = S.param, f = el.dataset.f; let v = el.value; if (f === 'minutesPerDay') { v = Math.round(Number(v)); if (!(v >= 5 && v <= 600)) { el.value = S.courses[cid].minutesPerDay; return; } } else if (v && !L.validDay(v)) return; patch('courses', cid, { [f]: v }).then(render, () => { }); },
+  'course-field': el => { const cid = S.param, f = el.dataset.f; let v = el.value;
+    if (f === 'goal') { patch('courses', cid, { goal: L.str(v, 200) }).then(render, () => { }); return; }
+    if (f.startsWith('exam.')) { const k = f.slice(5), ex = Object.assign({}, S.courses[cid].exam || {}); if (k === 'questions' || k === 'minutes') { const n = Math.round(Number(v)); ex[k] = v.trim() && n >= 1 && n <= 600 ? n : null; } else ex[k] = L.str(v, k === 'style' ? 200 : 40); patch('courses', cid, { exam: ex }).then(render, () => { }); return; } if (f === 'minutesPerDay') { v = Math.round(Number(v)); if (!(v >= 5 && v <= 600)) { el.value = S.courses[cid].minutesPerDay; return; } } else if (v && !L.validDay(v)) return; patch('courses', cid, { [f]: v }).then(render, () => { }); },
   'course-delete': el => { const c = S.courses[el.dataset.cid]; if (!c) return; confirmBox(`Delete "${c.title}"?`, 'This deletes its units, lessons, cards, review history, tests and material. It can\'t be undone.', 'Delete course', async () => { UI.modal = null; go('courses'); await deleteCourse(el.dataset.cid); toast('Course deleted.'); render(); }); },
   'place-skip': el => patch('courses', el.dataset.cid, { placementDone: true }).then(render, () => { })
 });
@@ -2732,7 +2745,7 @@ VIEWS.learn = lid => {
   const head = `${backLink('course-' + cid, (S.courses[cid] || {}).title || 'Course')}<div class="lesson-head"><span class="eyebrow">${esc(unit.title)} · lesson ${n + 1} of ${unit.lessons.length}</span><h1>${esc(les.title)}</h1>
     <div class="dots" role="img" aria-label="Idea ${Math.min(st.i + 1, ideas.length)} of ${ideas.length}">${ideas.map((i, k) => { const c = tbOf(i); return `<button type="button" class="dot ${c && c.firstScore != null ? 'done' : ''} ${k === st.i && st.step !== 'done' ? 'cur' : ''}" data-act="learn-goto" data-i="${k}" aria-label="Idea ${k + 1}: ${esc(i.title)}"></button>`; }).join('')}</div>${les.checked === false ? '<div class="flag small">The self-check pass did not run for this lesson. Treat added content with care.</div>' : ''}</div>`;
   if (st.step === 'done') {
-    const nextLid = n + 1 < unit.lessons.length ? uid + 'L' + (n + 1) : null, up = unitProgress(Object.assign({ id: uid }, unit));
+    const nextLid = n + 1 < unit.lessons.length && unit.lessons[n + 1].built ? uid + 'L' + (n + 1) : null, up = unitProgress(Object.assign({ id: uid }, unit));
     return `<div class="reader">${head}<div class="panel stack"><h2>Lesson complete</h2><div class="list">${ideas.map((i, k) => { const c = tbOf(i) || {}; return `<div class="row between"><button class="linkbtn" data-act="learn-goto" data-i="${k}">${esc(i.title)}</button><span class="num">${c.firstScore == null ? '–' : num(L.passScoreOf(c))}</span></div>`; }).join('')}</div>
       <p class="small muted">Scores are your best first try at each teach-back (before any re-teach). Explain an idea again to raise it. The unit passes when the average reaches ${L.passMark(settingsFor(cid).strictness)}.${up.total && up.done === up.total ? ` Unit average so far: ${up.avg}.` : ''} Review cards for these ideas start tomorrow.</p>
       <div class="row">${nextLid ? `<a class="btn primary" href="#learn-${nextLid}">Next lesson</a>` : `<a class="btn primary" href="#course-${cid}">Back to the course</a>`}<a class="btn" href="#guide-${uid}">Study guide</a></div></div></div>`;
@@ -2774,7 +2787,7 @@ const DEPTH_HINT = {
 const FOUND_LABEL = { lesson: 'Lesson content', notes: 'Your notes', answers: 'Your answers', feedback: 'Tutor feedback', chat: 'Chat transcript' };
 function addState(param) {
   const a = ui('add', () => ({ cid: '', newName: '', module: '', depth: 'refresher', title: '', text: '', kind: 'notes', plan: null, sid: null, inboxIds: [] }));
-  if (param && S.courses[param] && !a.plan && !a.sid && a.picked !== param) { a.cid = param; a.picked = param; }
+  if (param && S.courses[param] && S.courses[param].status === 'active' && !a.plan && a.picked !== param) { a.cid = param; a.picked = param; }
   return a;
 }
 function unitIdeaTitles(u) {
@@ -2782,14 +2795,13 @@ function unitIdeaTitles(u) {
   return (tb.length ? tb : (u.lessons || []).flatMap(l => l.ideas || [])).slice(0, 40);
 }
 VIEWS.add = param => {
-  const a = addState(param), cs = courseList();
-  if (a.cid !== 'new' && !S.courses[a.cid]) a.cid = cs.length === 1 ? cs[0].id : cs.length ? '' : 'new';
+  const a = addState(param), cs = courseList().filter(c => c.status === 'active');
+  if (a.cid !== 'new' && !(S.courses[a.cid] && S.courses[a.cid].status === 'active')) a.cid = cs.length === 1 ? cs[0].id : cs.length ? '' : 'new';
   if (a.plan) return planHtml(a);
   const c = S.courses[a.cid], us = c ? unitsOf(a.cid) : [], key = 'add';
-  const ready = (a.cid === 'new' ? a.newName.trim() : c) && a.text.trim().length >= 80;
   return `<div class="reader stack-lg">${backLink(c ? 'course-' + a.cid : 'home', c ? c.title : 'Today')}<div class="stack"><h1>Add learning</h1><p class="muted">Paste anything you learned: lesson text, your notes, your answers with the tutor's feedback, or a whole AI chat. Claude shows where it would file it before anything is built.</p></div>
   <div class="panel stack">
-    <div class="field"><span>Course</span><div class="seg scroll" role="group">${cs.map(x => `<button type="button" data-act="set" data-key="add.cid" data-val="${x.id}" aria-pressed="${a.cid === x.id}">${esc(cut(x.title, 28))}</button>`).join('')}<button type="button" data-act="set" data-key="add.cid" data-val="new" aria-pressed="${a.cid === 'new'}">New course</button></div></div>
+    <div class="field"><span>Course</span><div class="seg scroll" role="group">${cs.map(x => `<button type="button" data-act="set" data-key="add.cid" data-val="${x.id}" aria-pressed="${a.cid === x.id}" ${isBusy(key) ? 'disabled' : ''}>${esc(cut(x.title, 28))}</button>`).join('')}<button type="button" data-act="set" data-key="add.cid" data-val="new" aria-pressed="${a.cid === 'new'}" ${isBusy(key) ? 'disabled' : ''}>New course</button></div></div>
     ${a.cid === 'new' ? field('Name of the new course', textIn('add.newName', a.newName, 'placeholder="For example: AI Cred" maxlength="80"')) : ''}
     ${field('What you learned', `<textarea id="f-add-text" data-bind="add.text" rows="9" placeholder="Paste it here">${esc(a.text)}</textarea>`, `<span id="add-count">${a.text.length.toLocaleString()}</span> characters. Long pastes are split into ordered parts; nothing is cut.`)}
     <div class="field"><span>Or bring it in from</span>${materialPanel(c ? a.cid : '', 'add')}</div>
@@ -2800,10 +2812,10 @@ VIEWS.add = param => {
     <div class="field"><span>How much teaching</span>${seg('add.depth', DEPTH_OPTS, a.depth)}<span class="small muted">${DEPTH_HINT[a.depth] || ''}</span></div>
     ${field('Name for this addition <span class="muted">(optional)</span>', textIn('add.title', a.title, 'placeholder="Claude names it if blank" maxlength="120"'))}
   </div>
-  <div class="row sticky-cta">${aiOn() ? `<button class="btn primary" data-act="add-plan" ${isBusy(key) ? 'disabled' : ''}>Read it and show the plan</button>${ready ? '' : `<span class="small muted">${a.cid === '' ? 'Pick a course.' : a.cid === 'new' && !a.newName.trim() ? 'Name the course.' : 'Paste at least a few sentences.'}</span>`}` : needAI}</div>${busyHtml(key)}</div>`;
+  <div class="row sticky-cta">${aiOn() ? `<button class="btn primary" data-act="add-plan" ${isBusy(key) ? 'disabled' : ''}>Read it and show the plan</button>${a.sid && S.sources[a.sid] ? '<button class="btn ghost" data-act="add-cancel">Discard</button>' : ''}` : needAI}</div>${busyHtml(key)}</div>`;
 };
 function planHtml(a) {
-  const p = a.plan, c = S.courses[a.cid] || {}, us = unitsOf(a.cid), key = 'add';
+  const p = a.plan, c = S.courses[p.cid] || {}, us = unitsOf(p.cid), key = 'add';
   const nLessons = p.placements.reduce((n, x) => n + x.lessons.length, 0), nWeak = p.weakSpots.filter(w => w.keep).length;
   return `<div class="reader stack-lg"><div class="stack"><span class="eyebrow">${esc(c.title || 'Course')}</span><h1>Here is the plan</h1>
     <div class="row">${p.found.map(f => chip(FOUND_LABEL[f] || f)).join('')}</div>${p.note ? `<p class="muted">${esc(p.note)}</p>` : ''}</div>
@@ -2819,7 +2831,8 @@ function planHtml(a) {
 function mergePlans(into, more) {
   const norm = s => String(s || '').toLowerCase().trim();
   for (const p of more.placements) { const hit = into.placements.find(x => norm(x.unit) === norm(p.unit)); if (hit) hit.lessons.push(...p.lessons); else into.placements.push(p); }
-  into.weakSpots.push(...more.weakSpots); into.skipped.push(...more.skipped);
+  for (const w of more.weakSpots) if (!into.weakSpots.some(x => norm(x.gap) === norm(w.gap))) into.weakSpots.push(w);
+  for (const k of more.skipped) if (!into.skipped.some(x => norm(x.idea) === norm(k.idea))) into.skipped.push(k);
   into.found = [...new Set(into.found.concat(more.found))];
   into.title = into.title || more.title; into.note = into.note || more.note;
   return into;
@@ -2827,17 +2840,19 @@ function mergePlans(into, more) {
 Object.assign(ACT, {
   'add-plan': async () => {
     const a = UI.add, text = a.text.trim();
+    if (a.planning || isBusy('add')) return;
     if (a.cid === '') { toast('Pick a course first.'); return; }
     if (a.cid === 'new' && !a.newName.trim()) { toast('Name the new course first.'); return; }
     if (text.length < 80) { toast('Paste at least a few sentences.'); return; }
+    a.planning = true;
     if (a.cid === 'new') {
-      try { a.cid = await createCourse({ title: a.newName, goal: '', level: 'some', minutes: '30', mixOwn: true, mixAi: true, strictness: globalSettings().strictness || 'standard' }, 'quick'); } catch (e) { a.cid = 'new'; return; }
+      try { a.cid = await createCourse({ title: a.newName, goal: '', level: 'some', minutes: '30', mixOwn: true, mixAi: true, strictness: globalSettings().strictness || 'standard' }, 'quick'); a.createdCid = a.cid; } catch (e) { a.cid = 'new'; a.planning = false; return; }
       a.newName = '';
     }
     const cid = a.cid;
     const plan = await task('add', 'Reading what you pasted…', async signal => {
       /* If the text was edited after an earlier plan, the saved copy is replaced so the plan always matches what is on screen. */
-      if (a.sid && S.sources[a.sid] && a.sidText !== text) { await deleteSource(a.sid); a.sid = null; }
+      if (a.sid && S.sources[a.sid] && (a.sidText !== text || S.sources[a.sid].courseId !== cid)) { await deleteSource(a.sid); a.sid = null; }
       if (!a.sid || !S.sources[a.sid]) { a.sid = await addSource(cid, { title: a.title.trim() || 'Added ' + today(), kind: a.kind, text }); a.sidText = text; if (a.sid) await patch('sources', a.sid, { staged: true }); }
       if (!a.sid) throw { userMessage: 'The material couldn\'t be saved, so nothing was planned.' };
       const segs = L.splitSegments(text).map((t, i) => ({ ref: a.sid + ':' + i, text: t })), refs = new Set(segs.map(s => s.ref));
@@ -2853,51 +2868,57 @@ Object.assign(ACT, {
       for (const p of merged.placements) for (const l of p.lessons) l.segs = l.segs.filter(r => refs.has(r));
       return merged;
     });
+    a.planning = false;
     if (!plan) { render(); return; }
+    plan.cid = cid;
     const us = unitsOf(cid), hint = L.str(a.module, 120);
     for (const p of plan.placements) { p.unitId = L.matchUnit(p.unit, us) || (hint && plan.placements.length === 1 ? L.matchUnit(hint, us) : null) || 'new'; p.newTitle = p.unit; }
-    for (const w of plan.weakSpots) w.keep = true;
-    plan.weakSpots = plan.weakSpots.slice(0, 12); plan.skipped = plan.skipped.slice(0, 20);
+    plan.weakSpots = plan.weakSpots.slice(0, 20); plan.skipped = plan.skipped.slice(0, 30);
+    for (const w of plan.weakSpots) { w.keep = true; if (!w.card) w.card = L.validateCard({ type: 'short', prompt: `Your tutor's feedback flagged a gap${w.idea ? ' on "' + w.idea + '"' : ''}. What was it, and what should you do instead?`, answer: w.gap, explanation: w.gap, origin: 'source', difficulty: 3 }); }
     a.plan = plan;
     if (!a.title.trim() && plan.title && S.sources[a.sid]) patch('sources', a.sid, { title: plan.title }).catch(() => { });
-    for (const id of a.inboxIds || []) drop('inbox', id).catch(() => { });
-    a.inboxIds = [];
     render(); window.scrollTo(0, 0);
   },
   'plan-unit': el => { const p = UI.add && UI.add.plan && UI.add.plan.placements[+el.dataset.pi]; if (p) { p.unitId = el.value === 'new' || S.units[el.value] ? el.value : 'new'; render(); } },
   'plan-drop': el => { const pl = UI.add.plan.placements, pi = +el.dataset.pi; pl[pi].lessons.splice(+el.dataset.li, 1); if (!pl[pi].lessons.length) pl.splice(pi, 1); render(); },
-  'add-cancel': () => confirmBox('Discard this addition?', 'The pasted material is removed and nothing is added to the course.', 'Discard', async () => { const a = UI.add, cid = a && a.cid; if (a && a.sid) await deleteSource(a.sid); delete UI.add; go(S.courses[cid] ? 'course-' + cid : 'home'); }),
+  'add-cancel': () => confirmBox('Discard this addition?', 'The pasted material is removed and nothing is added to the course.', 'Discard', async () => { const a = UI.add, cid = a && a.cid; if (a && a.sid) await deleteSource(a.sid); delete UI.add; if (a && a.createdCid === cid && S.courses[cid] && !unitsOf(cid).length && !list('sources').some(s => s.courseId === cid)) { await deleteCourse(cid); go('home'); return; } go(S.courses[cid] ? 'course-' + cid : 'home'); }),
   'add-approve': async () => {
-    const a = UI.add, plan = a && a.plan, cid = a && a.cid; if (!plan || !S.courses[cid] || isBusy('add')) return;
+    const a = UI.add, plan = a && a.plan, cid = plan && plan.cid; if (!plan || !S.courses[cid] || S.courses[cid].status !== 'active' || isBusy('add')) return;
     const depth = L.DEPTHS.includes(a.depth) ? a.depth : 'refresher', t = today(), touched = [], names = [];
     let nLessons = 0;
     S.busy.add = { label: 'Filing it into your course…', ctl: new AbortController() }; render();
     try {
       for (const p of plan.placements) {
+        if (p.done) { if (p.doneUid && !touched.includes(p.doneUid)) { touched.push(p.doneUid); names.push((S.units[p.doneUid] || {}).title || ''); } continue; }
         const add = p.lessons.filter(l => L.str(l.title)).map(l => ({ title: L.str(l.title, 120), ideas: l.ideas, segs: l.segs, depth, sid: a.sid, addedDay: t }));
         if (!add.length) continue;
         let uid = p.unitId !== 'new' && S.units[p.unitId] ? p.unitId : null;
-        if (uid) { const u = S.units[uid]; await patch('units', uid, { lessons: (u.lessons || []).concat(add), passedAt: null, status: u.status === 'draft' ? 'planned' : u.status }); }
+        if (uid) { const u = S.units[uid]; await patch('units', uid, { lessons: (u.lessons || []).concat(add), passedAt: null, reviewOnly: false, status: u.status === 'draft' ? 'planned' : u.status }); }
         else { uid = L.uid('u'); await put('units', uid, { courseId: cid, n: unitsOf(cid).length, title: L.str(p.newTitle, 120) || L.str(p.unit, 120) || 'New module', summary: '', lessons: add, segs: [], origin: 'source', status: 'planned', createdAt: Date.now() }); }
+        p.done = true; p.doneUid = uid;
         if (!touched.includes(uid)) { touched.push(uid); names.push(S.units[uid].title); }
         nLessons += add.length;
       }
-      const weak = plan.weakSpots.filter(w => w.keep), home = touched[0] || (unitsOf(cid)[0] || {}).id || null;
+      const weak = plan.weakSpots.filter(w => w.keep), home = touched[0] || null;
       for (let i = 0; i < weak.length; i++) {
         const w = weak[i];
+        if (w.saved) continue;
         let cardId = null;
         if (w.card) { cardId = L.uid('k'); await put('cards', cardId, L.newCard(Object.assign({}, w.card, { courseId: cid, unitId: home, ideaTitle: w.idea, quote: w.quote, origin: 'source', fromFeedback: true, createdAt: Date.now() + i, fsrs: Object.assign(L.newFsrs(), { due: t }) }))); }
         await put('mistakes', L.uid('m'), { cardId, courseId: cid, unitId: home, ideaId: null, ideaTitle: w.idea, prompt: w.card ? w.card.prompt : (w.idea || 'Feedback from your tutor'), given: '', why: w.gap + (w.quote ? ' Feedback said: "' + w.quote + '"' : ''), kind: 'feedback', guess: false, day: t, at: Date.now() + i });
+        w.saved = true;
       }
       if (S.sources[a.sid]) await patch('sources', a.sid, { staged: false });
       const title = (S.sources[a.sid] || {}).title || plan.title || 'Addition';
       const summary = [nLessons ? plural(nLessons, 'topic') + ' in ' + names.join(', ') : '', weak.length ? plural(weak.length, 'weak spot') + ' from feedback' : ''].filter(Boolean).join(' · ');
-      await patch('courses', cid, { log: [{ at: Date.now(), day: t, title, summary, depth }].concat(L.arr(S.courses[cid].log, 30)).slice(0, 30) });
+      for (const id of a.inboxIds || []) drop('inbox', id).catch(() => { });
+      await patch('courses', cid, { doneAt: null, mix: Object.assign({}, S.courses[cid].mix, { own: true }), log: [{ at: Date.now(), day: t, title, summary, depth }].concat(L.arr(S.courses[cid].log, 30)).slice(0, 30) });
     } catch (e) { delete S.busy.add; render(); return; }
     delete S.busy.add; delete UI.add;
     toast(nLessons ? 'Filed. Building the new topics now.' : 'Weak spots saved.');
     go('course-' + cid);
-    for (const uid of touched) await buildUnit(uid);
+    /* One tap builds every touched module in turn; a Stop or an error ends the chain. */
+    for (const uid of touched) { if (!(await buildUnit(uid))) break; }
   }
 });
 
@@ -2986,6 +3007,7 @@ VIEWS.test = cid => {
   if (t.phase === 'run') {
     const q = t.qs[t.i], answered = t.qs.filter((x, i) => x.type === 'mc' ? t.answers[i] != null : (t.answers[i] || '').trim()).length;
     const waiting = !q;
+    if (t.expired) return `<div class="reader stack-lg"><div class="stack"><h1>Time is up</h1><p class="muted">${answered} of ${t.qs.length} questions answered. Your answers are kept as they are.</p></div><div><button class="btn primary" data-act="test-score">Score my test</button></div></div>`;
     return `<div class="reader stack"><div class="row between"><span class="small muted num">Question ${Math.min(t.i + 1, t.cfg.n)} of ${t.cfg.n}${t.qs.length < t.cfg.n ? ` · ${t.qs.length} written so far` : ''}</span><span class="chip due num" id="test-timer" aria-label="Time left">${fmtClock((t.endsAt - Date.now()) / 1000)}</span></div>${bar(100 * t.i / t.cfg.n)}
     ${waiting ? `<div class="qcard">${isBusy('testgen') ? busyHtml('testgen') : `<p>The next questions haven't been written yet.</p><div><button class="btn" data-act="test-more">Write more questions</button></div>`}</div>`
       : `<div class="qcard"><div class="qprompt">${inline(q.q)}</div>${q.type === 'mc' ? `<div class="options">${q.options.map((o, k) => `<button type="button" class="option ${t.answers[t.i] === k ? 'on' : ''}" data-act="test-pick" data-k="${k}" aria-pressed="${t.answers[t.i] === k}"><span class="letter">${'ABCDE'[k]}</span><span>${inline(o)}</span></button>`).join('')}</div>`
@@ -3011,6 +3033,7 @@ Object.assign(ACT, {
   'test-pick': el => { const t = UI.test; t.answers[t.i] = +el.dataset.k; render(); },
   'test-nav': el => { const t = UI.test; t.i = L.clamp(t.i + (+el.dataset.d), 0, t.cfg.n - 1); render(); window.scrollTo(0, 0); testMaybeMore(); },
   'test-more': () => testMaybeMore(),
+  'test-score': () => testFinish(),
   'test-finish': () => { const t = UI.test, blank = t.qs.filter((x, i) => x.type === 'mc' ? t.answers[i] == null : !(t.answers[i] || '').trim()).length; if (blank || t.qs.length < t.cfg.n) confirmBox('Finish the test now?', `${blank ? plural(blank, 'question') + ' unanswered. ' : ''}${t.qs.length < t.cfg.n ? `Only ${t.qs.length} of ${t.cfg.n} questions were written; you are scored on those.` : ''}`, 'Finish', testFinish, false); else testFinish(); },
   'test-override': async el => {
     const t = UI.test, it = t.items[+el.dataset.i]; if (!it || it.ok) return;
@@ -3027,7 +3050,7 @@ function tickTest() {
   const t = UI.test; if (!t || t.phase !== 'run' || S.route !== 'test') return;
   const left = (t.endsAt - Date.now()) / 1000, el = $('#test-timer');
   if (el) el.textContent = fmtClock(left);
-  if (left <= 0) { toast('Time is up.'); UI.modal = null; testFinish(); }
+  if (left <= 0 && !t.expired) { t.expired = true; UI.modal = null; toast('Time is up.'); render(); }
 }
 
 /* ---------- Cram mode ---------- */
@@ -3445,7 +3468,7 @@ VIEWS.more = () => VIEWS.weekly();
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 VIEWS.prefs = () => {
   const g = settingsFor(), bk = ui('bk', () => ({ erase: false, file: null, note: '' }));
-  return `<div class="reader stack-lg">${backLink('home', 'Today')}<div class="stack"><h1>Settings</h1><p class="muted">Defaults for every course. A course can override strictness, probing and retention on its Options tab.</p></div>
+  return `<div class="reader stack-lg">${backLink('home', 'Today')}<div class="stack"><h1>Settings</h1><p class="muted">Defaults for every course. A course can override strictness, probing and retention under its More tools, Course options.</p></div>
   <div class="panel stack"><h3>Teach-back</h3>
     <div class="field"><span>Probing depth</span>${seg('probing', PROBING, g.probing, 'pref')}<span class="small muted">How many follow-up questions before scoring. Deep adds edge cases and "why" chains.</span></div>
     <div class="field"><span>Grading strictness</span>${seg('strictness', STRICTNESS, g.strictness, 'pref')}<span class="small muted">Pass mark for a unit: lenient 60, standard 70, strict 80.</span></div></div>
@@ -3530,6 +3553,7 @@ document.addEventListener('input', ev => {
   Clock.last = Date.now();
   const el = ev.target, k = el.dataset && el.dataset.bind; if (!k) return;
   setPath(UI, k, el.type === 'checkbox' ? el.checked : el.value);
+  if (el.id === 'f-add-text') { const n = $('#add-count'); if (n) n.textContent = el.value.length.toLocaleString(); }
 });
 document.addEventListener('change', ev => {
   const el = ev.target; if (!el.dataset) return;

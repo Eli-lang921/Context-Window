@@ -82,6 +82,7 @@ VIEWS.test = cid => {
   if (t.phase === 'run') {
     const q = t.qs[t.i], answered = t.qs.filter((x, i) => x.type === 'mc' ? t.answers[i] != null : (t.answers[i] || '').trim()).length;
     const waiting = !q;
+    if (t.expired) return `<div class="reader stack-lg"><div class="stack"><h1>Time is up</h1><p class="muted">${answered} of ${t.qs.length} questions answered. Your answers are kept as they are.</p></div><div><button class="btn primary" data-act="test-score">Score my test</button></div></div>`;
     return `<div class="reader stack"><div class="row between"><span class="small muted num">Question ${Math.min(t.i + 1, t.cfg.n)} of ${t.cfg.n}${t.qs.length < t.cfg.n ? ` · ${t.qs.length} written so far` : ''}</span><span class="chip due num" id="test-timer" aria-label="Time left">${fmtClock((t.endsAt - Date.now()) / 1000)}</span></div>${bar(100 * t.i / t.cfg.n)}
     ${waiting ? `<div class="qcard">${isBusy('testgen') ? busyHtml('testgen') : `<p>The next questions haven't been written yet.</p><div><button class="btn" data-act="test-more">Write more questions</button></div>`}</div>`
       : `<div class="qcard"><div class="qprompt">${inline(q.q)}</div>${q.type === 'mc' ? `<div class="options">${q.options.map((o, k) => `<button type="button" class="option ${t.answers[t.i] === k ? 'on' : ''}" data-act="test-pick" data-k="${k}" aria-pressed="${t.answers[t.i] === k}"><span class="letter">${'ABCDE'[k]}</span><span>${inline(o)}</span></button>`).join('')}</div>`
@@ -107,6 +108,7 @@ Object.assign(ACT, {
   'test-pick': el => { const t = UI.test; t.answers[t.i] = +el.dataset.k; render(); },
   'test-nav': el => { const t = UI.test; t.i = L.clamp(t.i + (+el.dataset.d), 0, t.cfg.n - 1); render(); window.scrollTo(0, 0); testMaybeMore(); },
   'test-more': () => testMaybeMore(),
+  'test-score': () => testFinish(),
   'test-finish': () => { const t = UI.test, blank = t.qs.filter((x, i) => x.type === 'mc' ? t.answers[i] == null : !(t.answers[i] || '').trim()).length; if (blank || t.qs.length < t.cfg.n) confirmBox('Finish the test now?', `${blank ? plural(blank, 'question') + ' unanswered. ' : ''}${t.qs.length < t.cfg.n ? `Only ${t.qs.length} of ${t.cfg.n} questions were written; you are scored on those.` : ''}`, 'Finish', testFinish, false); else testFinish(); },
   'test-override': async el => {
     const t = UI.test, it = t.items[+el.dataset.i]; if (!it || it.ok) return;
@@ -123,7 +125,7 @@ function tickTest() {
   const t = UI.test; if (!t || t.phase !== 'run' || S.route !== 'test') return;
   const left = (t.endsAt - Date.now()) / 1000, el = $('#test-timer');
   if (el) el.textContent = fmtClock(left);
-  if (left <= 0) { toast('Time is up.'); UI.modal = null; testFinish(); }
+  if (left <= 0 && !t.expired) { t.expired = true; UI.modal = null; toast('Time is up.'); render(); }
 }
 
 /* ---------- Cram mode ---------- */

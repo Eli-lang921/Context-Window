@@ -255,7 +255,9 @@ async function openExplain(cardId, askFirst) {
   UI.ex = { cardId, passage: '', explain: null, answer: null, image: null, ask: '', askFirst };
   openModal('explain', {});
   const unit = S.units[card.unitId];
-  if (unit && card.quote) { try { UI.ex.passage = L.passageAround(await unitMaterial(unit, 200000), card.quote); } catch (e) { } if (UI.modal && UI.modal.kind === 'explain') render(); }
+  const lm = /^(.+)L(\d+)$/.exec(card.lessonId || ''), les = lm && unit && (unit.lessons || [])[+lm[2]];
+  const segs = les && les.segs && les.segs.length ? les.segs : les && les.sid && S.sources[les.sid] ? Array.from({ length: num(S.sources[les.sid].segCount) }, (_, i) => les.sid + ':' + i) : unit ? unit.segs : null;
+  if (segs && card.quote) { try { UI.ex.passage = L.passageAround(await unitMaterial({ segs }, 200000), card.quote); } catch (e) { } if (UI.modal && UI.modal.kind === 'explain') render(); }
 }
 MODALS.explain = () => {
   const x = UI.ex, card = S.cards[x.cardId]; if (!card) return '<p>This item was removed.</p>';

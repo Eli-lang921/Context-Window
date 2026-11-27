@@ -38,6 +38,7 @@ document.addEventListener('input', ev => {
   Clock.last = Date.now();
   const el = ev.target, k = el.dataset && el.dataset.bind; if (!k) return;
   setPath(UI, k, el.type === 'checkbox' ? el.checked : el.value);
+  if (el.id === 'f-add-text') { const n = $('#add-count'); if (n) n.textContent = el.value.length.toLocaleString(); }
 });
 document.addEventListener('change', ev => {
   const el = ev.target; if (!el.dataset) return;

@@ -245,13 +245,15 @@ async function checkDayDone() {
 }
 async function checkUnitPass(unitId) {
   const unit = S.units[unitId]; if (!unit || unit.passedAt) return;
+  if ((unit.lessons || []).some(l => !l.built)) return;
   const st = L.unitStatus(cardsOf('unitId', unitId).filter(c => c.type === 'teachback' && c.status !== 'retired'), settingsFor(unit.courseId).strictness);
   if (!st.passed) return;
   const first = !unit.passCounted;
   await patch('units', unitId, { passedAt: Date.now(), passScore: st.avg, passCounted: true }).catch(() => { });
   const all = unitsOf(unit.courseId), courseDone = all.length > 0 && all.every(u => u.passedAt || u.id === unitId);
-  if (courseDone && S.courses[unit.courseId] && !S.courses[unit.courseId].doneAt) await patch('courses', unit.courseId, { doneAt: Date.now() }).catch(() => { });
-  if (first) await bumpMeta((m, day) => { m.stats.unitsPassed++; addXp(m, day, L.xpFor({ kind: 'unitPass' })); if (courseDone) m.stats.coursesDone++; });
+  const course = S.courses[unit.courseId], firstDone = courseDone && course && !course.doneCounted;
+  if (courseDone && course && !course.doneAt) await patch('courses', unit.courseId, { doneAt: Date.now(), doneCounted: true }).catch(() => { });
+  if (first || firstDone) await bumpMeta((m, day) => { if (first) { m.stats.unitsPassed++; addXp(m, day, L.xpFor({ kind: 'unitPass' })); } if (firstDone) m.stats.coursesDone++; });
   toast(`Module passed: ${unit.title} (${st.avg}).`);
 }
 /* Pull every card of an idea (or a unit, when the idea is unknown) earlier after a miss in a test or game. */

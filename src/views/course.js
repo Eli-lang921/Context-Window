@@ -50,7 +50,7 @@ VIEWS.courses = () => {
   return `<div class="stack-lg"><div class="row between"><h1>Courses</h1><a class="btn primary" href="#newcourse">New course</a></div>
   ${cs.length ? `<div class="grid">${cs.map(c => { const us = unitsOf(c.id), passed = us.filter(u => u.passedAt).length; return `<a class="panel deck" href="#course-${c.id}"><div class="row between"><h3>${esc(c.title)}</h3>${c.status === 'active' ? paceChip(c) : chip(c.status === 'syllabus' ? 'Syllabus to review' : 'Setting up', 'due')}</div>
     <p class="small muted clamp2">${esc(c.goal || '')}</p>${bar(us.length ? 100 * passed / us.length : 0, 'good')}<div class="stats"><span><b>${passed}</b> of ${us.length} units passed</span><span><b>${cardsOf('courseId', c.id).filter(x => L.isDue(x, today())).length}</b> due</span></div></a>`; }).join('')}</div>`
-    : emptyBox('No courses yet. A course starts from a goal, such as passing an exam. Claude drafts the syllabus and you edit it before anything is built.')}</div>`;
+    : emptyBox('No courses yet. Name one and start adding what you learn; Claude files each addition into modules and topics.')}</div>`;
 };
 
 /* ---------- New course: a name is enough; everything else is optional ---------- */
@@ -123,7 +123,7 @@ function materialPanel(cid, mode = 'full') {
   UI.matMode = mode;
   const srcs = cid ? list('sources').filter(s => s.courseId === cid).sort((a, b) => a.createdAt - b.createdAt) : [];
   const inbox = inboxGroups(), g = settingsFor(), key = 'mat-' + cid;
-  const listHtml = srcs.length ? `<div class="list">${srcs.map(s => `<div class="row between"><div class="grow"><b>${esc(s.title)}</b>${s.staged ? ' ' + chip('Not filed yet', 'due') : ''}<div class="small muted">${esc(KIND_LABEL[s.kind] || 'Material')} · ${num(s.chars).toLocaleString()} characters${num(s.segCount) > 1 ? ` · split into ${num(s.segCount)} ordered parts` : ''}</div></div><button class="btn sm ghost" data-act="mat-del" data-sid="${s.id}">Remove</button></div>`).join('')}</div>` : '<p class="small muted">No sources yet.</p>';
+  const listHtml = srcs.length ? `<div class="list">${srcs.map(s => `<div class="row between"><div class="grow"><b>${esc(s.title)}</b>${s.staged ? ' ' + chip('Not filed yet', 'due') : ''}<div class="small muted">${esc(KIND_LABEL[s.kind] || 'Material')} · ${num(s.chars).toLocaleString()} characters${num(s.segCount) > 1 ? ` · split into ${num(s.segCount)} ordered parts` : ''}</div></div><div class="row">${s.staged && S.courses[cid] && S.courses[cid].status === 'active' ? `<button class="btn sm" data-act="mat-replan" data-sid="${s.id}">Plan it</button>` : ''}<button class="btn sm ghost" data-act="mat-del" data-sid="${s.id}">Remove</button></div></div>`).join('')}</div>` : '<p class="small muted">No sources yet.</p>';
   if (mode === 'list') return `<div class="panel stack" id="material"><div class="row between"><h3>Sources</h3><span class="small muted">${plural(srcs.length, 'source')}</span></div>${listHtml}<p class="small muted">Removing a source keeps the lessons already built from it.</p></div>`;
   const tabs = [['paste', mode === 'add' ? 'Type or paste' : 'Paste'], ['file', 'File'], ['photo', 'Photos'], ['chat', `From chat${inbox.length ? ` (${inbox.length})` : ''}`]].filter(([k]) => k !== 'paste' || mode === 'add' || g.sources.paste !== false).concat(connList().map(k => [k, CONNECTORS[k].label]), [['link', 'Web or YouTube']]);
   if (!tabs.some(t => t[0] === m.tab)) m.tab = tabs[0][0];
@@ -157,6 +157,7 @@ async function matAdd(cid, src) {
   render(); return sid;
 }
 Object.assign(ACT, {
+  'mat-replan': async el => { const sid = el.dataset.sid, s = S.sources[sid]; if (!s) return; const text = await loadSourceText(sid); UI.add = { cid: s.courseId, picked: s.courseId, newName: '', module: '', depth: 'refresher', title: s.title, text, kind: s.kind || 'notes', plan: null, sid, sidText: text.trim(), inboxIds: [] }; go('add-' + s.courseId); },
   'mat-add-paste': el => matAdd(el.dataset.cid, { title: UI.mat.title, kind: 'notes', text: UI.mat.text }),
   'mat-file': async el => {
     const f = el.files && el.files[0], cid = el.dataset.cid; if (!f) return;
@@ -246,7 +247,7 @@ VIEWS.syllabus = cid => {
     ${(u.lessons || []).length ? `<ol class="small lessons">${u.lessons.map(l => `<li><b>${esc(l.title)}</b>${l.ideas.length ? `<span class="muted">: ${l.ideas.map(esc).join('; ')}</span>` : ''}</li>`).join('')}</ol>` : '<span class="small muted">Lessons are planned when you build this unit.</span>'}</div>`).join('') || emptyBox('No units yet.')}</div>
   <div class="panel stack"><h3>Add a unit</h3><div class="row nowrap">${textIn('newunit', ui('newunit', ''), 'placeholder="Unit title" maxlength="120"')}<button class="btn" data-act="unit-add" data-cid="${cid}">Add</button></div></div>
   <div class="row">${c.status !== 'active' ? `<button class="btn primary" data-act="syl-approve" data-cid="${cid}" ${us.length ? '' : 'disabled'}>Approve syllabus</button>` : `<a class="btn primary" href="#course-${cid}">Done</a>`}
-  ${aiOn() ? `<button class="btn" data-act="syl-draft" data-cid="${cid}" ${isBusy(key) ? 'disabled' : ''}>Draft again</button>` : ''}</div>${us.some(u => u.status === 'ready') ? '<p class="small muted">Drafting again keeps units you have already built.</p>' : ''}${busyHtml(key)}</div>`;
+  ${aiOn() && c.status !== 'active' ? `<button class="btn" data-act="syl-draft" data-cid="${cid}" ${isBusy(key) ? 'disabled' : ''}>Draft again</button>` : ''}</div>${c.status !== 'active' && us.some(u => u.status === 'ready') ? '<p class="small muted">Drafting again keeps modules you have already built.</p>' : ''}${busyHtml(key)}</div>`;
 };
 Object.assign(ACT, {
   'syl-draft': el => draftSyllabus(el.dataset.cid),
@@ -300,7 +301,7 @@ async function unitMaterialSmart(unit) {
 }
 async function buildUnit(uid) {
   const key = 'build-' + uid;
-  await task(key, 'Planning the module…', async signal => {
+  return task(key, 'Planning the module…', async signal => {
     let unit = Object.assign({ id: uid }, S.units[uid]); const c = S.courses[unit.courseId], cid = unit.courseId;
     const material = c.mix.own ? await unitMaterialSmart(unit) : '';
     const label = t => { if (S.busy[key]) { S.busy[key].label = t; render(); } };
@@ -318,7 +319,9 @@ async function buildUnit(uid) {
       if (have) { prior.push(...have.ideas.map(i => i.title)); if (!les.built) await markBuilt(n); continue; }
       const depth = L.DEPTHS.includes(les.depth) ? les.depth : 'full', early = unit.reviewOnly || depth === 'review';
       /* A topic added through Add learning carries its own source segments; older ones draw on the module's. */
-      const lesMat = !c.mix.own ? '' : (les.segs && les.segs.length ? await unitMaterial({ segs: les.segs }) : material);
+      let lesSegs = les.segs && les.segs.length ? les.segs : null;
+      if (!lesSegs && les.sid && S.sources[les.sid]) lesSegs = Array.from({ length: num(S.sources[les.sid].segCount) }, (_, i) => les.sid + ':' + i);
+      const lesMat = lesSegs ? await unitMaterial({ segs: lesSegs }) : material;
       label(`Writing topic ${n + 1} of ${N}: ${les.title}`);
       const raw = await ai(P.lesson({ course: c, unit, lesson: les.ideas.length ? les : { title: les.title, ideas: [les.title] }, prior, material: lesMat, mix: c.mix, depth }), { signal });
       const ideas = L.arr(raw && raw.ideas, 5).map(L.validateIdea).filter(Boolean);
@@ -382,6 +385,9 @@ VIEWS.course = cid => {
       <div class="field"><span>Target retention</span>${seg('retention', [['', 'Default'], ['0.85', '85%'], ['0.9', '90%'], ['0.93', '93%'], ['0.95', '95%']], ov.retention ? String(ov.retention) : '', 'course-opt')}</div>
       <div class="row top">${field('Minutes per day', `<input type="text" id="co-min" value="${esc(c.minutesPerDay)}" inputmode="numeric" maxlength="3" data-act-change="course-field" data-f="minutesPerDay" style="max-width:8em">`)}${field('Target date', `<input type="date" id="co-dl" value="${esc(c.deadline || '')}" data-act-change="course-field" data-f="deadline">`)}</div>
       <p class="small muted">Pass mark for a module: ${L.passMark(cfg.strictness)}.</p></div>
+      <div class="panel stack"><h3>About this course</h3>${field('What you want from it', `<input type="text" id="co-goal" value="${esc(c.goal || '')}" maxlength="200" data-act-change="course-field" data-f="goal">`)}
+      <div class="row top">${field('Exam questions', `<input type="text" id="co-exq" value="${esc((c.exam || {}).questions || '')}" inputmode="numeric" maxlength="3" data-act-change="course-field" data-f="exam.questions">`)}${field('Exam minutes', `<input type="text" id="co-exm" value="${esc((c.exam || {}).minutes || '')}" inputmode="numeric" maxlength="3" data-act-change="course-field" data-f="exam.minutes">`)}${field('Passing score', `<input type="text" id="co-exp" value="${esc((c.exam || {}).passing || '')}" maxlength="40" data-act-change="course-field" data-f="exam.passing">`)}</div>
+      ${field('Exam question style', `<input type="text" id="co-exs" value="${esc((c.exam || {}).style || '')}" maxlength="200" data-act-change="course-field" data-f="exam.style">`)}</div>
       <div class="row"><button class="btn ghost danger" data-act="course-delete" data-cid="${cid}">Delete course</button></div>`}</div>`;
   }
   const tools = [[`#test-${cid}`, 'Practice test', 'Quick test or full exam simulation'], [`#games-${cid}`, 'Games', 'Match, fill the blank, speed round, quiz board'], [`#cram-${cid}`, 'Cram mode', 'High-yield review before a deadline'],
@@ -400,14 +406,16 @@ VIEWS.course = cid => {
       ${(u.lessons || []).length ? `<ol class="lessons small">${u.lessons.map((l, n) => { const lid = u.id + 'L' + n; return `<li>${l.built ? `<a href="#learn-${lid}">${esc(l.title)}</a>` : `<span class="muted">${esc(l.title)}</span>`} ${!l.built ? chip('Not built yet') : l.depth === 'review' ? chip('Review cards only') : lessonDone(lid) ? chip('Done', 'good') : ''}</li>`; }).join('')}</ol>` : '<span class="small muted">Topics are planned when you build this module.</span>'}
       <div class="row">${up.pending || !up.lessons ? (aiOn() ? `<button class="btn sm ${isBusy(bkey) ? '' : 'primary'}" data-act="unit-build" data-uid="${u.id}" ${isBusy(bkey) ? 'disabled' : ''}>${up.built ? `Build ${plural(up.pending, 'new topic')}` : 'Build this module'}</button>` : needAI) : ''}${up.built ? `<a class="btn sm ghost" href="#guide-${u.id}">Study guide and audio recap</a>` : ''}</div>${busyHtml(bkey)}</div>`; }).join('')}</div>`
     : `<div class="empty stack"><b>This course is empty.</b><span>Paste what you have learned and Claude will file it into modules and topics, then teach and review it with you.</span><div><a class="btn primary" href="#add-${cid}">Add your first learning</a></div></div>`}
-  ${log.length ? `<div class="stack tight"><h2>Recently added</h2><div class="panel list">${log.slice(0, 5).map(x => `<div class="row between"><span class="grow"><b>${esc(x.title)}</b><br><span class="small muted">${esc(x.summary || '')}</span></span><span class="small muted">${esc(x.day || '')}</span></div>`).join('')}</div></div>` : ''}</div>`;
+  ${log.length ? `<div class="stack tight"><h2>Recently added</h2><div class="panel list">${log.slice(0, 10).map(x => `<div class="row between"><span class="grow"><b>${esc(x.title)}</b><br><span class="small muted">${esc(x.summary || '')}</span></span><span class="small muted">${esc(x.day || '')}</span></div>`).join('')}</div></div>` : ''}</div>`;
 };
 Object.assign(ACT, {
   'unit-build': el => buildUnit(el.dataset.uid),
   'course-skip-plan': async el => { await patch('courses', el.dataset.cid, { status: 'active', startedDay: today(), mix: Object.assign({}, S.courses[el.dataset.cid].mix, { own: true }) }).catch(() => { }); go('add-' + el.dataset.cid); },
   'course-mix-own': el => { const c = S.courses[el.dataset.cid]; patch('courses', el.dataset.cid, { mix: Object.assign({}, c.mix, { own: true }) }).then(render, () => { }); },
   'course-opt': el => { const cid = S.param, k = el.dataset.key, v = el.dataset.val; const cur = Object.assign({}, S.settings[cid] || {}); if (v === '') delete cur[k]; else cur[k] = k === 'retention' ? Number(v) : v; put('settings', cid, cur).then(render, () => { }); render(); },
-  'course-field': el => { const cid = S.param, f = el.dataset.f; let v = el.value; if (f === 'minutesPerDay') { v = Math.round(Number(v)); if (!(v >= 5 && v <= 600)) { el.value = S.courses[cid].minutesPerDay; return; } } else if (v && !L.validDay(v)) return; patch('courses', cid, { [f]: v }).then(render, () => { }); },
+  'course-field': el => { const cid = S.param, f = el.dataset.f; let v = el.value;
+    if (f === 'goal') { patch('courses', cid, { goal: L.str(v, 200) }).then(render, () => { }); return; }
+    if (f.startsWith('exam.')) { const k = f.slice(5), ex = Object.assign({}, S.courses[cid].exam || {}); if (k === 'questions' || k === 'minutes') { const n = Math.round(Number(v)); ex[k] = v.trim() && n >= 1 && n <= 600 ? n : null; } else ex[k] = L.str(v, k === 'style' ? 200 : 40); patch('courses', cid, { exam: ex }).then(render, () => { }); return; } if (f === 'minutesPerDay') { v = Math.round(Number(v)); if (!(v >= 5 && v <= 600)) { el.value = S.courses[cid].minutesPerDay; return; } } else if (v && !L.validDay(v)) return; patch('courses', cid, { [f]: v }).then(render, () => { }); },
   'course-delete': el => { const c = S.courses[el.dataset.cid]; if (!c) return; confirmBox(`Delete "${c.title}"?`, 'This deletes its units, lessons, cards, review history, tests and material. It can\'t be undone.', 'Delete course', async () => { UI.modal = null; go('courses'); await deleteCourse(el.dataset.cid); toast('Course deleted.'); render(); }); },
   'place-skip': el => patch('courses', el.dataset.cid, { placementDone: true }).then(render, () => { })
 });
@@ -477,7 +485,7 @@ VIEWS.learn = lid => {
   const head = `${backLink('course-' + cid, (S.courses[cid] || {}).title || 'Course')}<div class="lesson-head"><span class="eyebrow">${esc(unit.title)} · lesson ${n + 1} of ${unit.lessons.length}</span><h1>${esc(les.title)}</h1>
     <div class="dots" role="img" aria-label="Idea ${Math.min(st.i + 1, ideas.length)} of ${ideas.length}">${ideas.map((i, k) => { const c = tbOf(i); return `<button type="button" class="dot ${c && c.firstScore != null ? 'done' : ''} ${k === st.i && st.step !== 'done' ? 'cur' : ''}" data-act="learn-goto" data-i="${k}" aria-label="Idea ${k + 1}: ${esc(i.title)}"></button>`; }).join('')}</div>${les.checked === false ? '<div class="flag small">The self-check pass did not run for this lesson. Treat added content with care.</div>' : ''}</div>`;
   if (st.step === 'done') {
-    const nextLid = n + 1 < unit.lessons.length ? uid + 'L' + (n + 1) : null, up = unitProgress(Object.assign({ id: uid }, unit));
+    const nextLid = n + 1 < unit.lessons.length && unit.lessons[n + 1].built ? uid + 'L' + (n + 1) : null, up = unitProgress(Object.assign({ id: uid }, unit));
     return `<div class="reader">${head}<div class="panel stack"><h2>Lesson complete</h2><div class="list">${ideas.map((i, k) => { const c = tbOf(i) || {}; return `<div class="row between"><button class="linkbtn" data-act="learn-goto" data-i="${k}">${esc(i.title)}</button><span class="num">${c.firstScore == null ? '–' : num(L.passScoreOf(c))}</span></div>`; }).join('')}</div>
       <p class="small muted">Scores are your best first try at each teach-back (before any re-teach). Explain an idea again to raise it. The unit passes when the average reaches ${L.passMark(settingsFor(cid).strictness)}.${up.total && up.done === up.total ? ` Unit average so far: ${up.avg}.` : ''} Review cards for these ideas start tomorrow.</p>
       <div class="row">${nextLid ? `<a class="btn primary" href="#learn-${nextLid}">Next lesson</a>` : `<a class="btn primary" href="#course-${cid}">Back to the course</a>`}<a class="btn" href="#guide-${uid}">Study guide</a></div></div></div>`;

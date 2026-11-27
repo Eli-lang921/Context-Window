@@ -116,11 +116,12 @@ Module the learner named for this paste: ${moduleHint ? `"${moduleHint}"` : 'not
 ${JSON_ONLY}
 Return {"title":"a short name for this paste","found":["lesson" | "notes" | "answers" | "feedback" | "chat"],
 "placements":[{"unit":"","isNew":false,"lessons":[{"title":"one topic","ideas":["one key idea, as a short phrase"],"segs":["refs of the segments that teach it"]}]}],
-"weakSpots":[{"idea":"the idea it concerns","gap":"what the feedback said the learner got wrong, missed or should improve, in one or two plain sentences","quote":"the feedback's own words, copied exactly, under 30 words","card":{"type":"short" | "apply" | "flash","prompt":"a question that tests exactly this gap","answer":"","rubric":["1-3 points"],"explanation":"2 sentences","origin":"source","difficulty":3}}],
+"weakSpots":[{"idea":"the idea it concerns","gap":"what the feedback said the learner got wrong, missed or should improve, in one or two plain sentences","quote":"the feedback's own words, copied exactly, under 30 words","card":{"type":"short" | "apply" | "flash","prompt":"a question that tests exactly this gap","answer":"the model answer (never empty)","rubric":["1-3 points"],"explanation":"2 sentences","origin":"source","difficulty":3}}],
 "skipped":[{"idea":"","reason":"already covered in <unit>"}],
 "note":"one sentence on anything the learner should know about this plan, or empty"}
 Rules:
 - A unit is one module of the course; a lesson is one topic inside it, with 1-3 key ideas. Plan only what the paste actually teaches.
+- Limits: at most 12 units, 8 lessons per unit, 12 weak spots and 20 skipped ideas. Merge closely related topics rather than exceed them.
 - unit: when the content belongs to a unit in EXISTING UNITS, copy that unit's title exactly and set isNew false. Otherwise give a new unit title and set isNew true; when the module is known, start the title with it (for example "Module 3: Tool use").
 - Teachable content is what the lesson, tutor or notes state. The learner's own answers are not facts to teach; use them only with the feedback, to find gaps.
 - weakSpots: only from explicit feedback, corrections or grades in the paste that say the learner got something wrong, left something out or should improve. One entry per distinct gap. Ignore praise. Never invent a gap. Empty array when the paste has no such feedback.

@@ -227,6 +227,13 @@ const fill = (page, id, v) => page.fill('#' + id, v);
     if (ad2.depth !== 'refresher' || ad2.fb !== 1 || !ad2.next) fail('second add wrong: ' + JSON.stringify(ad2));
     await goto(page, 'add-' + cid); await fill(page, 'f-add-text', 'Something to throw away. '.repeat(8)); await act(page, 'add-plan'); await act(page, 'add-cancel'); await act(page, 'confirm-yes'); await page.waitForTimeout(100);
     if ((await page.evaluate(() => Object.keys(S.sources).length)) !== ad.sources + 1) fail('discarding an addition left its source behind');
+    /* A new course made only for a discarded paste is removed with it; a double tap makes one course, not two. */
+    const nCourses = await page.evaluate(() => Object.keys(S.courses).length);
+    await goto(page, 'add'); await act(page, 'set', '[data-key="add.cid"][data-val="new"]'); await fill(page, 'f-add-newName', 'Throwaway'); await fill(page, 'f-add-text', 'Text for a course that will be discarded. '.repeat(6));
+    await page.evaluate(() => { const b = document.querySelector('[data-act="add-plan"]'); b.click(); b.click(); }); await page.waitForTimeout(60); await idle(page);
+    if ((await page.evaluate(() => Object.keys(S.courses).length)) !== nCourses + 1) fail('double tap on plan created more than one course');
+    await act(page, 'add-cancel'); await act(page, 'confirm-yes'); await page.waitForTimeout(200);
+    if ((await page.evaluate(() => Object.keys(S.courses).length)) !== nCourses) fail('discarding did not remove the course created for that paste');
     await goto(page, 'course-' + cid);
     const calls = await page.evaluate(() => [...new Set(window.__calls)]);
     for (const t of ['INTAKE', 'DIGEST', 'SYLLABUS', 'LESSON', 'SELF-CHECK', 'PLACEMENT', 'PROBE', 'TEACH-BACK GRADE', 'HINT', 'GRADE', 'PRACTICE TEST', 'GRADE TEST', 'CRAM SELECTION', 'EXPLAIN', 'QUESTION', 'AUDIO RECAP', 'STUDY GUIDE', 'WEEKLY REPORT', 'TUTOR']) if (!calls.includes(t)) fail('prompt never used: ' + t);
