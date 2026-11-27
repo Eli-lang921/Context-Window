@@ -491,7 +491,7 @@ const L = (() => {
     raw = raw && typeof raw === 'object' ? raw : {};
     const placements = arr(raw.placements, 12).map(p => ({
       unit: str(p && p.unit, 120), isNew: !!(p && p.isNew), kind: p && p.kind === 'gaps' ? 'gaps' : 'course', done: !!(p && p.done === true),
-      tasks: arr(p && p.tasks, 5).map(t => ({ title: str(t && t.title, 120) || 'Exercise', steps: arr(t && t.steps, 8).map(x => str(x, 500)).filter(Boolean), criteria: arr(t && t.criteria, 8).map(x => str(x, 500)).filter(Boolean) })).filter(t => t.criteria.length || t.steps.length),
+      tasks: arr(p && p.tasks, 9).map(t => ({ title: str(t && t.title, 120) || 'Exercise', steps: arr(t && t.steps, 8).map(x => str(x, 500)).filter(Boolean), criteria: arr(t && t.criteria, 8).map(x => str(x, 500)).filter(Boolean) })).filter(t => t.criteria.length || t.steps.length),
       lessons: arr(p && p.lessons, 8).map(l => ({ title: str(l && l.title, 120), ideas: arr(l && l.ideas, 3).map(x => str(x, 160)).filter(Boolean), segs: arr(l && l.segs, 12).map(x => str(x, 60)).filter(Boolean), known: !!(l && l.known === true) })).filter(l => l.title && l.ideas.length)
     })).filter(p => p.unit && (p.lessons.length || p.tasks.length));
     /* A tip on an answer the tutor already graded strong is not a weak spot. */

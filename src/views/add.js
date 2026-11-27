@@ -58,7 +58,7 @@ function planHtml(a) {
 function mergePlans(into, more) {
   const norm = s => String(s || '').toLowerCase().trim();
   for (const p of more.placements) { const hit = into.placements.find(x => norm(x.unit) === norm(p.unit)); if (hit) { hit.lessons.push(...p.lessons); hit.tasks.push(...p.tasks); } else into.placements.push(p); }
-  for (const p of into.placements) p.tasks = p.tasks.slice(0, 8);
+  for (const p of into.placements) p.tasks = p.tasks.slice(0, 9);
   for (const w of more.weakSpots) if (!into.weakSpots.some(x => norm(x.gap) === norm(w.gap))) into.weakSpots.push(w);
   for (const k of more.skipped) if (!into.skipped.some(x => norm(x.idea) === norm(k.idea))) into.skipped.push(k);
   for (const g of more.glossary) if (!into.glossary.some(x => norm(x.term) === norm(g.term))) into.glossary.push(g);
