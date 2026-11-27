@@ -53,7 +53,7 @@ function loadPlan() {
       if (!touched.includes(u.title)) touched.push(u.title);
       stats.placements++; stats.lessons += p.lessons.length;
     }
-    for (const w of merged.weakSpots) { if (!w.card) { stats.noCard++; w.card = L.validateCard({ type: 'short', prompt: `Your tutor's feedback flagged a gap${w.idea ? ' on "' + w.idea + '"' : ''}. What was it, and what should you do instead?`, answer: w.gap, explanation: w.gap, origin: 'source', difficulty: 3 }); } weak.push(Object.assign({ sid: s.sid, unitTitle: touched[0] || '' }, w)); }
+    for (const w of merged.weakSpots) { if (!w.card) { stats.noCard++; w.card = L.validateCard({ type: 'short', prompt: `Your tutor's feedback flagged a gap${w.idea ? ' on "' + w.idea + '"' : ''}. What was it, and what should you do instead?`, answer: w.gap, explanation: w.gap, origin: 'source', difficulty: 3 }); } const wu = w.unit ? units.find(u => u.id === L.matchUnit(w.unit, units)) : null; weak.push(Object.assign({ sid: s.sid, unitTitle: wu ? wu.title : (touched[0] || '') }, w)); }
     skipped.push(...merged.skipped.map(k => Object.assign({ sid: s.sid }, k)));
     log.push({ sid: s.sid, title: merged.title || s.title, found: merged.found, note: merged.note, units: touched, lessons: merged.placements.reduce((a, p) => a + p.lessons.length, 0), weak: merged.weakSpots.length });
   }

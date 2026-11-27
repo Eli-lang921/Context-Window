@@ -124,9 +124,12 @@ Object.assign(ACT, {
       for (let i = 0; i < weak.length; i++) {
         const w = weak[i];
         if (w.saved) continue;
+        /* File the gap under the module it is about, not just the first module this paste touched. */
+        const wp = w.unit && plan.placements.find(p => p.doneUid && [p.unit, p.newTitle].some(t => String(t || '').toLowerCase().trim() === w.unit.toLowerCase().trim()));
+        const wHome = (wp && wp.doneUid) || (w.unit && L.matchUnit(w.unit, unitsOf(cid))) || home;
         let cardId = null;
-        if (w.card) { cardId = L.uid('k'); await put('cards', cardId, L.newCard(Object.assign({}, w.card, { courseId: cid, unitId: home, ideaTitle: w.idea, quote: w.quote, origin: 'source', fromFeedback: true, createdAt: Date.now() + i, fsrs: Object.assign(L.newFsrs(), { due: t }) }))); }
-        await put('mistakes', L.uid('m'), { cardId, courseId: cid, unitId: home, ideaId: null, ideaTitle: w.idea, prompt: w.card ? w.card.prompt : (w.idea || 'Feedback from your tutor'), given: '', why: w.gap + (w.quote ? ' Feedback said: "' + w.quote + '"' : ''), kind: 'feedback', guess: false, day: t, at: Date.now() + i });
+        if (w.card) { cardId = L.uid('k'); await put('cards', cardId, L.newCard(Object.assign({}, w.card, { courseId: cid, unitId: wHome, ideaTitle: w.idea, quote: w.quote, origin: 'source', fromFeedback: true, createdAt: Date.now() + i, fsrs: Object.assign(L.newFsrs(), { due: t }) }))); }
+        await put('mistakes', L.uid('m'), { cardId, courseId: cid, unitId: wHome, ideaId: null, ideaTitle: w.idea, prompt: w.card ? w.card.prompt : (w.idea || 'Feedback from your tutor'), given: '', why: w.gap + (w.quote ? ' Feedback said: "' + w.quote + '"' : ''), kind: 'feedback', guess: false, day: t, at: Date.now() + i });
         w.saved = true;
       }
       if (S.sources[a.sid]) await patch('sources', a.sid, { staged: false });

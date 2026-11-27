@@ -116,7 +116,7 @@ Module the learner named for this paste: ${moduleHint ? `"${moduleHint}"` : 'not
 ${JSON_ONLY}
 Return {"title":"a short name for this paste","found":["lesson" | "notes" | "answers" | "feedback" | "chat"],
 "placements":[{"unit":"","isNew":false,"lessons":[{"title":"one topic","ideas":["one key idea, as a short phrase"],"segs":["refs of the segments that teach it"]}]}],
-"weakSpots":[{"idea":"the idea it concerns","gap":"what the feedback said the learner got wrong, missed or should improve, in one or two plain sentences","quote":"the feedback's own words, copied exactly, under 30 words","card":{"type":"short" | "apply" | "flash","prompt":"a question that tests exactly this gap","answer":"the model answer (never empty)","rubric":["1-3 points"],"explanation":"2 sentences","origin":"source","difficulty":3}}],
+"weakSpots":[{"idea":"the idea it concerns","unit":"the title of the unit this gap belongs to: one of your placements or an existing unit, copied exactly, or empty if none fits","gap":"what the feedback said the learner got wrong, missed or should improve, in one or two plain sentences","quote":"the feedback's own words, copied exactly, under 30 words","card":{"type":"short" | "apply" | "flash","prompt":"a question that tests exactly this gap","answer":"the model answer (never empty)","rubric":["1-3 points"],"explanation":"2 sentences","origin":"source","difficulty":3}}],
 "skipped":[{"idea":"","reason":"already covered in <unit>"}],
 "note":"one sentence on anything the learner should know about this plan, or empty"}
 Rules:

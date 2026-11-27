@@ -474,7 +474,7 @@ const L = (() => {
       unit: str(p && p.unit, 120), isNew: !!(p && p.isNew),
       lessons: arr(p && p.lessons, 8).map(l => ({ title: str(l && l.title, 120), ideas: arr(l && l.ideas, 4).map(x => str(x, 160)).filter(Boolean), segs: arr(l && l.segs, 12).map(x => str(x, 60)).filter(Boolean) })).filter(l => l.title && l.ideas.length)
     })).filter(p => p.unit && p.lessons.length);
-    const weakSpots = arr(raw.weakSpots, 12).map(w => ({ idea: str(w && w.idea, 160), gap: str(w && w.gap, 500), quote: str(w && w.quote, 400), card: validateCard(w && w.card) })).filter(w => w.gap);
+    const weakSpots = arr(raw.weakSpots, 12).map(w => ({ idea: str(w && w.idea, 160), unit: str(w && w.unit, 120), gap: str(w && w.gap, 500), quote: str(w && w.quote, 400), card: validateCard(w && w.card) })).filter(w => w.gap);
     const skipped = arr(raw.skipped, 20).map(s => ({ idea: str(s && s.idea, 160), reason: str(s && s.reason, 200) })).filter(s => s.idea);
     return { title: str(raw.title, 120), found: arr(raw.found, 6).map(x => str(x, 20)).filter(x => FOUND.includes(x)), placements, weakSpots, skipped, note: str(raw.note, 400) };
   }
