@@ -314,10 +314,27 @@ const L = (() => {
   const PASS = { lenient: 60, standard: 70, strict: 80 };
   const DEFAULTS = {
     probing: 'standard', strictness: 'standard', retention: 0.9, restDays: [],
-    voiceOn: true, voiceName: 'buttery', voiceRate: 1,
+    voiceOn: true, voiceName: 'buttery', voiceRate: 1, buildModel: 'default', buildModelId: '',
     mix: { outline: true, ai: true, own: true }, sources: { paste: true, vault: true, drive: true, notion: true }
   };
 
+  /* Which Claude builds a course (plans, lessons, self-check, guides). A tier follows whatever model the
+     platform currently serves for it; a named model falls back to its tier when the viewer cannot use it. */
+  const BUILD_MODELS = [
+    { key: 'quick', label: 'Fast', hint: 'Haiku class. Quickest and lightest on your usage; plainer lessons.', tier: 'quick' },
+    { key: 'default', label: 'Balanced', hint: 'Sonnet class. A good default for most material.', tier: 'default' },
+    { key: 'complex', label: 'Most capable', hint: 'Opus class. Slower and heavier on your usage; best for dense or subtle material.', tier: 'complex' },
+    { key: 'claude-fable-5-2', label: 'Fable 5.2', hint: 'A named model. If your plan cannot use it here, the most capable tier answers instead.', tier: 'complex', model: 'claude-fable-5-2' },
+    { key: 'other', label: 'Other', hint: 'Any Claude model id you type. If it cannot answer, the most capable tier does.', tier: 'complex' }
+  ];
+  function modelOpts(choice, customId) {
+    const m = BUILD_MODELS.find(x => x.key === choice) || BUILD_MODELS[1];
+    const out = { modelTier: m.tier };
+    const id = m.key === 'other' ? String(customId || '').trim() : m.model;
+    if (id && /^claude-[a-z0-9.\-]{2,60}$/.test(id)) out.model = id;
+    else if (m.key === 'other') out.modelTier = 'default';
+    return out;
+  }
   const clone = o => JSON.parse(JSON.stringify(o));
   const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
   const pad = n => String(n).padStart(2, '0');
@@ -632,6 +649,8 @@ const L = (() => {
     if (!PASS[g.strictness]) g.strictness = 'standard';
     g.retention = clamp(Number(g.retention) || 0.9, 0.8, 0.95);
     g.voiceRate = clamp(Number(g.voiceRate) || 1, 0.7, 1.5);
+    if (!BUILD_MODELS.some(m => m.key === g.buildModel)) g.buildModel = 'default';
+    g.buildModelId = typeof g.buildModelId === 'string' ? g.buildModelId.trim().slice(0, 64) : '';
     g.restDays = (Array.isArray(g.restDays) ? g.restDays : []).map(Number).filter(n => n >= 0 && n <= 6);
     return g;
   }
@@ -779,7 +798,7 @@ const L = (() => {
       unit: str(p && p.unit, 120), isNew: !!(p && p.isNew),
       lessons: arr(p && p.lessons, 8).map(l => ({ title: str(l && l.title, 120), ideas: arr(l && l.ideas, 4).map(x => str(x, 160)).filter(Boolean), segs: arr(l && l.segs, 12).map(x => str(x, 60)).filter(Boolean) })).filter(l => l.title && l.ideas.length)
     })).filter(p => p.unit && p.lessons.length);
-    const weakSpots = arr(raw.weakSpots, 12).map(w => ({ idea: str(w && w.idea, 160), gap: str(w && w.gap, 500), quote: str(w && w.quote, 400), card: validateCard(w && w.card) })).filter(w => w.gap);
+    const weakSpots = arr(raw.weakSpots, 12).map(w => ({ idea: str(w && w.idea, 160), unit: str(w && w.unit, 120), gap: str(w && w.gap, 500), quote: str(w && w.quote, 400), card: validateCard(w && w.card) })).filter(w => w.gap);
     const skipped = arr(raw.skipped, 20).map(s => ({ idea: str(s && s.idea, 160), reason: str(s && s.reason, 200) })).filter(s => s.idea);
     return { title: str(raw.title, 120), found: arr(raw.found, 6).map(x => str(x, 20)).filter(x => FOUND.includes(x)), placements, weakSpots, skipped, note: str(raw.note, 400) };
   }
@@ -832,7 +851,7 @@ const L = (() => {
     unitStatus, passScoreOf, pace, weakness, cramSelect, ideaLevel, examConfig, scoreTest, clozeMatch,
     accuracyBy, weakestIdeas, weekSummary, settingsFor,
     chunkText, splitSegments, tokens, overlap, slug, passageAround,
-    DEPTHS, FOUND, validateIntake, matchUnit,
+    DEPTHS, FOUND, validateIntake, matchUnit, BUILD_MODELS, modelOpts,
     str, arr, validateVisual, validatePart, validateCard, validateIdea, validateSyllabus, validateTestQ, ideaMarkdown, guideMarkdown
   };
 })();
@@ -957,7 +976,7 @@ Module the learner named for this paste: ${moduleHint ? `"${moduleHint}"` : 'not
 ${JSON_ONLY}
 Return {"title":"a short name for this paste","found":["lesson" | "notes" | "answers" | "feedback" | "chat"],
 "placements":[{"unit":"","isNew":false,"lessons":[{"title":"one topic","ideas":["one key idea, as a short phrase"],"segs":["refs of the segments that teach it"]}]}],
-"weakSpots":[{"idea":"the idea it concerns","gap":"what the feedback said the learner got wrong, missed or should improve, in one or two plain sentences","quote":"the feedback's own words, copied exactly, under 30 words","card":{"type":"short" | "apply" | "flash","prompt":"a question that tests exactly this gap","answer":"the model answer (never empty)","rubric":["1-3 points"],"explanation":"2 sentences","origin":"source","difficulty":3}}],
+"weakSpots":[{"idea":"the idea it concerns","unit":"the title of the unit this gap belongs to: one of your placements or an existing unit, copied exactly, or empty if none fits","gap":"what the feedback said the learner got wrong, missed or should improve, in one or two plain sentences","quote":"the feedback's own words, copied exactly, under 30 words","card":{"type":"short" | "apply" | "flash","prompt":"a question that tests exactly this gap","answer":"the model answer (never empty)","rubric":["1-3 points"],"explanation":"2 sentences","origin":"source","difficulty":3}}],
 "skipped":[{"idea":"","reason":"already covered in <unit>"}],
 "note":"one sentence on anything the learner should know about this plan, or empty"}
 Rules:
@@ -1411,6 +1430,8 @@ const aiOn = () => !!S.sample && !S.aiBlocked;
 async function ai(prompt, opts = {}) {
   if (!aiOn()) throw { code: 'no_ai', message: 'no sample capability' };
   const o = { modelTier: opts.tier || 'default', cache: false };
+  /* Course-building calls use the model the learner chose in Settings. */
+  if (opts.build) { const g = settingsFor(); Object.assign(o, L.modelOpts(g.buildModel, g.buildModelId)); }
   if (opts.signal) o.signal = opts.signal;
   if (opts.images && opts.images.length) o.images = opts.images;
   try { return await S.sample.json(prompt, o); }
@@ -2482,7 +2503,7 @@ async function draftSyllabus(cid) {
     if (c.mix.own) await digestSources(cid, signal, key);
     if (S.busy[key]) { S.busy[key].label = 'Drafting your syllabus…'; render(); }
     const digests = c.mix.own ? list('sources').filter(x => x.courseId === cid).flatMap(s => s.digest || []).slice(0, 500) : [];
-    const syl = L.validateSyllabus(await ai(P.syllabus({ course: c, outline: c.mix.outline ? c.outline : '', digests, mix: c.mix }), { signal }));
+    const syl = L.validateSyllabus(await ai(P.syllabus({ course: c, outline: c.mix.outline ? c.outline : '', digests, mix: c.mix }), { signal, build: true }));
     if (!syl.units.length) throw { code: 'empty_completion' };
     const refs = new Set(digests.map(d => d.ref));
     for (const u of unitsOf(cid)) if (u.status !== 'ready') await drop('units', u.id);
@@ -2566,7 +2587,7 @@ async function buildUnit(uid) {
     const material = c.mix.own ? await unitMaterialSmart(unit) : '';
     const label = t => { if (S.busy[key]) { S.busy[key].label = t; render(); } };
     if (!(unit.lessons || []).length) {
-      const r = await ai(P.unitPlan({ course: c, unit, others: unitsOf(cid).filter(u => u.id !== uid).map(u => u.title), material }), { signal });
+      const r = await ai(P.unitPlan({ course: c, unit, others: unitsOf(cid).filter(u => u.id !== uid).map(u => u.title), material }), { signal, build: true });
       const lessons = L.validateSyllabus({ units: [{ title: unit.title, lessons: r && r.lessons }] }).units[0].lessons.filter(l => l.ideas.length);
       if (!lessons.length) throw { code: 'empty_completion' };
       await patch('units', uid, { lessons }); unit = Object.assign({ id: uid }, S.units[uid]);
@@ -2583,13 +2604,13 @@ async function buildUnit(uid) {
       if (!lesSegs && les.sid && S.sources[les.sid]) lesSegs = Array.from({ length: num(S.sources[les.sid].segCount) }, (_, i) => les.sid + ':' + i);
       const lesMat = lesSegs ? await unitMaterial({ segs: lesSegs }) : material;
       label(`Writing topic ${n + 1} of ${N}: ${les.title}`);
-      const raw = await ai(P.lesson({ course: c, unit, lesson: les.ideas.length ? les : { title: les.title, ideas: [les.title] }, prior, material: lesMat, mix: c.mix, depth }), { signal });
+      const raw = await ai(P.lesson({ course: c, unit, lesson: les.ideas.length ? les : { title: les.title, ideas: [les.title] }, prior, material: lesMat, mix: c.mix, depth }), { signal, build: true });
       const ideas = L.arr(raw && raw.ideas, 5).map(L.validateIdea).filter(Boolean);
       if (!ideas.length) throw { code: 'invalid_json' };
       label(`Self-checking topic ${n + 1} of ${N}…`);
       let flags = [], checked = true;
       try {
-        const v = await ai(P.verify({ ideas: ideas.map(i => ({ title: i.title, analogy: i.analogy, mechanism: i.mechanism, example: i.example, why: i.why, keyPoints: i.keyPoints, cards: i.cards.map(k => ({ type: k.type, prompt: k.prompt, answer: k.answer, origin: k.origin })) })), material: lesMat }), { signal });
+        const v = await ai(P.verify({ ideas: ideas.map(i => ({ title: i.title, analogy: i.analogy, mechanism: i.mechanism, example: i.example, why: i.why, keyPoints: i.keyPoints, cards: i.cards.map(k => ({ type: k.type, prompt: k.prompt, answer: k.answer, origin: k.origin })) })), material: lesMat }), { signal, build: true });
         flags = L.arr(v && v.flags, 20).map(f => ({ idea: Number(f && f.idea), card: f && Number.isInteger(f.card) ? f.card : null, problem: L.str(f && f.problem, 500), severity: f && f.severity === 'high' ? 'high' : 'low' })).filter(f => f.problem && Number.isInteger(f.idea) && ideas[f.idea]);
       } catch (e) { if (signal.aborted) throw e; checked = false; }
       const doc = { courseId: cid, unitId: uid, n, title: les.title, depth, checked, createdAt: Date.now(), ideas: [] };
@@ -2812,6 +2833,7 @@ VIEWS.add = param => {
     <div class="field"><span>How much teaching</span>${seg('add.depth', DEPTH_OPTS, a.depth)}<span class="small muted">${DEPTH_HINT[a.depth] || ''}</span></div>
     ${field('Name for this addition <span class="muted">(optional)</span>', textIn('add.title', a.title, 'placeholder="Claude names it if blank" maxlength="120"'))}
   </div>
+  <div class="panel stack"><h3>Built with</h3>${modelPicker()}</div>
   <div class="row sticky-cta">${aiOn() ? `<button class="btn primary" data-act="add-plan" ${isBusy(key) ? 'disabled' : ''}>Read it and show the plan</button>${a.sid && S.sources[a.sid] ? '<button class="btn ghost" data-act="add-cancel">Discard</button>' : ''}` : needAI}</div>${busyHtml(key)}</div>`;
 };
 function planHtml(a) {
@@ -2819,7 +2841,7 @@ function planHtml(a) {
   const nLessons = p.placements.reduce((n, x) => n + x.lessons.length, 0), nWeak = p.weakSpots.filter(w => w.keep).length;
   return `<div class="reader stack-lg"><div class="stack"><span class="eyebrow">${esc(c.title || 'Course')}</span><h1>Here is the plan</h1>
     <div class="row">${p.found.map(f => chip(FOUND_LABEL[f] || f)).join('')}</div>${p.note ? `<p class="muted">${esc(p.note)}</p>` : ''}</div>
-  <div class="panel stack"><div class="field"><span>How much teaching</span>${seg('add.depth', DEPTH_OPTS, a.depth)}<span class="small muted">${DEPTH_HINT[a.depth] || ''}</span></div></div>
+  <div class="panel stack"><div class="field"><span>How much teaching</span>${seg('add.depth', DEPTH_OPTS, a.depth)}<span class="small muted">${DEPTH_HINT[a.depth] || ''}</span></div>${modelPicker()}</div>
   ${p.placements.length ? p.placements.map((pl, pi) => `<div class="panel plan-card stack"><div class="field"><span>Goes into</span><select id="plan-unit-${pi}" data-act-change="plan-unit" data-pi="${pi}">${us.map(u => `<option value="${u.id}" ${pl.unitId === u.id ? 'selected' : ''}>${esc(u.title)}</option>`).join('')}<option value="new" ${pl.unitId === 'new' ? 'selected' : ''}>A new module</option></select></div>
       ${pl.unitId === 'new' ? field('Name of the new module', `<input type="text" id="f-add-plan-placements-${pi}-newTitle" data-bind="add.plan.placements.${pi}.newTitle" value="${esc(pl.newTitle)}" maxlength="120">`) : ''}
       <div class="stack tight"><span class="small"><b>${plural(pl.lessons.length, 'topic')} to add</b></span>${pl.lessons.map((l, li) => `<div class="plan-lesson stack tight"><div class="row nowrap"><input type="text" id="f-add-plan-placements-${pi}-lessons-${li}-title" data-bind="add.plan.placements.${pi}.lessons.${li}.title" value="${esc(l.title)}" maxlength="120" aria-label="Topic title"><button type="button" class="btn sm ghost icon" data-act="plan-drop" data-pi="${pi}" data-li="${li}" aria-label="Leave this topic out">${icon('x')}</button></div><ul class="tightlist small muted">${l.ideas.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>`).join('')}</div></div>`).join('')
@@ -2862,7 +2884,7 @@ Object.assign(ACT, {
         const batch = []; let size = 0;
         while (i < segs.length && (size + segs[i].text.length <= 80000 || !batch.length)) { batch.push(segs[i]); size += segs[i].text.length; i++; }
         if (S.busy.add && segs.length > batch.length) { S.busy.add.label = `Reading what you pasted (part ${Math.min(i, segs.length)} of ${segs.length})…`; render(); }
-        const got = L.validateIntake(await ai(P.intake({ course: S.courses[cid], units, moduleHint: L.str(a.module, 120), segments: batch, planned: merged.placements.flatMap(p => p.lessons.map(l => p.unit + ' / ' + l.title)) }), { signal }));
+        const got = L.validateIntake(await ai(P.intake({ course: S.courses[cid], units, moduleHint: L.str(a.module, 120), segments: batch, planned: merged.placements.flatMap(p => p.lessons.map(l => p.unit + ' / ' + l.title)) }), { signal, build: true }));
         merged = mergePlans(merged, got);
       }
       for (const p of merged.placements) for (const l of p.lessons) l.segs = l.segs.filter(r => refs.has(r));
@@ -2903,9 +2925,12 @@ Object.assign(ACT, {
       for (let i = 0; i < weak.length; i++) {
         const w = weak[i];
         if (w.saved) continue;
+        /* File the gap under the module it is about, not just the first module this paste touched. */
+        const wp = w.unit && plan.placements.find(p => p.doneUid && [p.unit, p.newTitle].some(t => String(t || '').toLowerCase().trim() === w.unit.toLowerCase().trim()));
+        const wHome = (wp && wp.doneUid) || (w.unit && L.matchUnit(w.unit, unitsOf(cid))) || home;
         let cardId = null;
-        if (w.card) { cardId = L.uid('k'); await put('cards', cardId, L.newCard(Object.assign({}, w.card, { courseId: cid, unitId: home, ideaTitle: w.idea, quote: w.quote, origin: 'source', fromFeedback: true, createdAt: Date.now() + i, fsrs: Object.assign(L.newFsrs(), { due: t }) }))); }
-        await put('mistakes', L.uid('m'), { cardId, courseId: cid, unitId: home, ideaId: null, ideaTitle: w.idea, prompt: w.card ? w.card.prompt : (w.idea || 'Feedback from your tutor'), given: '', why: w.gap + (w.quote ? ' Feedback said: "' + w.quote + '"' : ''), kind: 'feedback', guess: false, day: t, at: Date.now() + i });
+        if (w.card) { cardId = L.uid('k'); await put('cards', cardId, L.newCard(Object.assign({}, w.card, { courseId: cid, unitId: wHome, ideaTitle: w.idea, quote: w.quote, origin: 'source', fromFeedback: true, createdAt: Date.now() + i, fsrs: Object.assign(L.newFsrs(), { due: t }) }))); }
+        await put('mistakes', L.uid('m'), { cardId, courseId: cid, unitId: wHome, ideaId: null, ideaTitle: w.idea, prompt: w.card ? w.card.prompt : (w.idea || 'Feedback from your tutor'), given: '', why: w.gap + (w.quote ? ' Feedback said: "' + w.quote + '"' : ''), kind: 'feedback', guess: false, day: t, at: Date.now() + i });
         w.saved = true;
       }
       if (S.sources[a.sid]) await patch('sources', a.sid, { staged: false });
@@ -3333,14 +3358,14 @@ Object.assign(ACT, {
   'guide-export': async el => { const uid = el.dataset.uid, u = S.units[uid], c = S.courses[u.courseId] || { title: 'Course' }; const md = L.guideMarkdown(c, u, unitLessons(uid).filter(Boolean), u.guide, today()); await offerFile(L.slug(c.title + '-' + u.title) + '.md', md, md); },
   'guide-make': async el => {
     const uid = el.dataset.uid, u = S.units[uid];
-    const r = await task('guide-' + uid, 'Writing the cheat sheet…', signal => ai(P.guide({ course: S.courses[u.courseId], unit: u, ideas: unitIdeaBriefs(uid) }), { signal }));
+    const r = await task('guide-' + uid, 'Writing the cheat sheet…', signal => ai(P.guide({ course: S.courses[u.courseId], unit: u, ideas: unitIdeaBriefs(uid) }), { signal, build: true }));
     if (!r) return;
     const list5 = x => L.arr(x, 12).map(s => L.str(s, 400)).filter(Boolean);
     await patch('units', uid, { guide: { summary: L.str(r.summary, 800), mustKnow: list5(r.mustKnow), formulas: list5(r.formulas), pitfalls: list5(r.pitfalls) } }).catch(() => { }); render();
   },
   'recap-make': async el => {
     const uid = el.dataset.uid, u = S.units[uid];
-    const r = await task('guide-' + uid, 'Writing the audio recap…', signal => ai(P.recap({ course: S.courses[u.courseId], unit: u, ideas: unitIdeaBriefs(uid) }), { signal }));
+    const r = await task('guide-' + uid, 'Writing the audio recap…', signal => ai(P.recap({ course: S.courses[u.courseId], unit: u, ideas: unitIdeaBriefs(uid) }), { signal, build: true }));
     if (!r) return;
     const lines = L.arr(r.lines, 14).map(s => L.str(s, 1900)).filter(Boolean);
     if (!lines.length) { toast(AI_COPY.invalid_json, true); return; }
@@ -3472,6 +3497,9 @@ VIEWS.prefs = () => {
   <div class="panel stack"><h3>Teach-back</h3>
     <div class="field"><span>Probing depth</span>${seg('probing', PROBING, g.probing, 'pref')}<span class="small muted">How many follow-up questions before scoring. Deep adds edge cases and "why" chains.</span></div>
     <div class="field"><span>Grading strictness</span>${seg('strictness', STRICTNESS, g.strictness, 'pref')}<span class="small muted">Pass mark for a unit: lenient 60, standard 70, strict 80.</span></div></div>
+  <div class="panel stack"><h3>Model for building courses</h3><p class="small muted">Used when Claude files what you paste, writes lessons, runs the self-check and writes study guides. Grading, hints and the tutor keep the standard model so they stay quick.</p>
+    ${modelPicker()}
+    ${aiOn() ? `<div class="row"><button class="btn sm" data-act="model-test" ${isBusy('modeltest') ? 'disabled' : ''}>Test this choice</button>${UI.modelTest ? `<span class="small muted">${esc(UI.modelTest)}</span>` : ''}</div>${busyHtml('modeltest')}` : ''}</div>
   <div class="panel stack"><h3>Review schedule</h3>
     <div class="field"><span>Target retention</span>${seg('retention', [['0.85', '85%'], ['0.9', '90%'], ['0.93', '93%'], ['0.95', '95%']], String(g.retention), 'pref')}<span class="small muted">The chance you still remember a card when it comes due. Higher means more frequent reviews. The daily cap stays ${L.CAP} units, and the study day resets at 3 a.m.</span></div>
     <div class="field"><span>Weekly rest days</span><div class="seg" role="group">${DAYS.map((d, i) => `<button type="button" data-act="pref-rest" data-d="${i}" aria-pressed="${g.restDays.includes(i)}">${d}</button>`).join('')}</div><span class="small muted">Rest days don't break your streak. Their due cards roll to the next day.</span></div></div>
@@ -3488,9 +3516,21 @@ VIEWS.prefs = () => {
     ${bk.file ? `<div class="flag stack tight"><b>${esc(bk.note)}</b><label class="tick"><input type="checkbox" id="bk-erase" data-bind="bk.erase" ${bk.erase ? 'checked' : ''}><span>Erase what is here first, so the page matches the backup exactly</span></label><span class="small">${bk.erase ? 'Everything not in the backup is deleted. This can\'t be undone.' : 'Items in the backup overwrite items with the same id. Everything else stays.'}</span><div class="row"><button class="btn primary" data-act="backup-restore" ${isBusy('backup') ? 'disabled' : ''}>Restore now</button><button class="btn ghost" data-act="backup-cancel">Cancel</button></div></div>` : bk.note ? `<div class="small muted">${esc(bk.note)}</div>` : ''}${busyHtml('backup')}</div>
   <div class="panel stack tight"><h3>Sharing and reminders</h3><p class="small">Your data is visible only to you. To stop the page itself opening for others, set sharing to private from the artifact's Share menu.</p><p class="small">A daily phone reminder is set up outside this page: ask Claude in a chat to schedule one at the time you want.</p></div></div>`;
 };
+function modelPicker() {
+  const g = settingsFor(), cur = L.BUILD_MODELS.find(m => m.key === g.buildModel) || L.BUILD_MODELS[1];
+  return `<div class="field"><span>Model</span>${seg('buildModel', L.BUILD_MODELS.map(m => [m.key, m.label]), g.buildModel, 'pref')}<span class="small muted">${esc(cur.hint)}</span></div>
+    ${g.buildModel === 'other' ? field('Model id', `<input type="text" id="pref-model-id" value="${esc(g.buildModelId)}" maxlength="64" placeholder="claude-opus-5-5" data-act-change="pref-model-id" autocomplete="off" spellcheck="false">`, 'A Claude API model id, for example claude-sonnet-5-5. Use "Test this choice" in Settings to see which model actually answers.') : ''}`;
+}
 async function savePref(changes) { await put('settings', 'global', Object.assign({}, globalSettings(), changes)).catch(() => { }); render(); }
 Object.assign(ACT, {
-  'pref': el => { const k = el.dataset.key, v = el.dataset.val; savePref({ [k]: k === 'retention' || k === 'voiceRate' ? Number(v) : k === 'voiceOn' ? v === 'true' : v }); if (k === 'voiceOn' && v !== 'true') Voice.stop(); },
+  'pref': el => { const k = el.dataset.key, v = el.dataset.val; if (k === 'buildModel') UI.modelTest = ''; savePref({ [k]: k === 'retention' || k === 'voiceRate' ? Number(v) : k === 'voiceOn' ? v === 'true' : v }); if (k === 'voiceOn' && v !== 'true') Voice.stop(); },
+  'pref-model-id': el => { const v = el.value.trim().toLowerCase().slice(0, 64); UI.modelTest = ''; savePref({ buildModelId: v }); },
+  'model-test': async () => {
+    const g = settingsFor(), o = Object.assign({ cache: false }, L.modelOpts(g.buildModel, g.buildModelId));
+    UI.modelTest = '';
+    const r = await task('modeltest', 'Asking the model…', signal => S.sample('Reply with the single word OK.', Object.assign({ signal }, o)));
+    if (r) { UI.modelTest = r.modelApplied ? `Answered by ${r.modelApplied}.` : `${o.model ? 'That model could not answer here, so the ' : 'Answered by the '}${{ quick: 'fast', default: 'balanced', complex: 'most capable' }[r.modelTierApplied] || 'standard'} tier ${o.model ? 'answered instead' : ''}.`.replace(' .', '.'); render(); }
+  },
   'pref-rest': el => { const d = +el.dataset.d, cur = settingsFor().restDays; savePref({ restDays: cur.includes(d) ? cur.filter(x => x !== d) : cur.concat(d).sort() }); },
   'pref-mix': el => savePref({ mix: Object.assign({}, settingsFor().mix, { [el.dataset.k]: el.checked }) }),
   'pref-src': el => savePref({ sources: Object.assign({}, settingsFor().sources, { [el.dataset.k]: el.checked }) }),

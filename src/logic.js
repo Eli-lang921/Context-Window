@@ -9,10 +9,27 @@ const L = (() => {
   const PASS = { lenient: 60, standard: 70, strict: 80 };
   const DEFAULTS = {
     probing: 'standard', strictness: 'standard', retention: 0.9, restDays: [],
-    voiceOn: true, voiceName: 'buttery', voiceRate: 1,
+    voiceOn: true, voiceName: 'buttery', voiceRate: 1, buildModel: 'default', buildModelId: '',
     mix: { outline: true, ai: true, own: true }, sources: { paste: true, vault: true, drive: true, notion: true }
   };
 
+  /* Which Claude builds a course (plans, lessons, self-check, guides). A tier follows whatever model the
+     platform currently serves for it; a named model falls back to its tier when the viewer cannot use it. */
+  const BUILD_MODELS = [
+    { key: 'quick', label: 'Fast', hint: 'Haiku class. Quickest and lightest on your usage; plainer lessons.', tier: 'quick' },
+    { key: 'default', label: 'Balanced', hint: 'Sonnet class. A good default for most material.', tier: 'default' },
+    { key: 'complex', label: 'Most capable', hint: 'Opus class. Slower and heavier on your usage; best for dense or subtle material.', tier: 'complex' },
+    { key: 'claude-fable-5-2', label: 'Fable 5.2', hint: 'A named model. If your plan cannot use it here, the most capable tier answers instead.', tier: 'complex', model: 'claude-fable-5-2' },
+    { key: 'other', label: 'Other', hint: 'Any Claude model id you type. If it cannot answer, the most capable tier does.', tier: 'complex' }
+  ];
+  function modelOpts(choice, customId) {
+    const m = BUILD_MODELS.find(x => x.key === choice) || BUILD_MODELS[1];
+    const out = { modelTier: m.tier };
+    const id = m.key === 'other' ? String(customId || '').trim() : m.model;
+    if (id && /^claude-[a-z0-9.\-]{2,60}$/.test(id)) out.model = id;
+    else if (m.key === 'other') out.modelTier = 'default';
+    return out;
+  }
   const clone = o => JSON.parse(JSON.stringify(o));
   const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
   const pad = n => String(n).padStart(2, '0');
@@ -327,6 +344,8 @@ const L = (() => {
     if (!PASS[g.strictness]) g.strictness = 'standard';
     g.retention = clamp(Number(g.retention) || 0.9, 0.8, 0.95);
     g.voiceRate = clamp(Number(g.voiceRate) || 1, 0.7, 1.5);
+    if (!BUILD_MODELS.some(m => m.key === g.buildModel)) g.buildModel = 'default';
+    g.buildModelId = typeof g.buildModelId === 'string' ? g.buildModelId.trim().slice(0, 64) : '';
     g.restDays = (Array.isArray(g.restDays) ? g.restDays : []).map(Number).filter(n => n >= 0 && n <= 6);
     return g;
   }
@@ -527,7 +546,7 @@ const L = (() => {
     unitStatus, passScoreOf, pace, weakness, cramSelect, ideaLevel, examConfig, scoreTest, clozeMatch,
     accuracyBy, weakestIdeas, weekSummary, settingsFor,
     chunkText, splitSegments, tokens, overlap, slug, passageAround,
-    DEPTHS, FOUND, validateIntake, matchUnit,
+    DEPTHS, FOUND, validateIntake, matchUnit, BUILD_MODELS, modelOpts,
     str, arr, validateVisual, validatePart, validateCard, validateIdea, validateSyllabus, validateTestQ, ideaMarkdown, guideMarkdown
   };
 })();

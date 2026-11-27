@@ -33,6 +33,7 @@ VIEWS.add = param => {
     <div class="field"><span>How much teaching</span>${seg('add.depth', DEPTH_OPTS, a.depth)}<span class="small muted">${DEPTH_HINT[a.depth] || ''}</span></div>
     ${field('Name for this addition <span class="muted">(optional)</span>', textIn('add.title', a.title, 'placeholder="Claude names it if blank" maxlength="120"'))}
   </div>
+  <div class="panel stack"><h3>Built with</h3>${modelPicker()}</div>
   <div class="row sticky-cta">${aiOn() ? `<button class="btn primary" data-act="add-plan" ${isBusy(key) ? 'disabled' : ''}>Read it and show the plan</button>${a.sid && S.sources[a.sid] ? '<button class="btn ghost" data-act="add-cancel">Discard</button>' : ''}` : needAI}</div>${busyHtml(key)}</div>`;
 };
 function planHtml(a) {
@@ -40,7 +41,7 @@ function planHtml(a) {
   const nLessons = p.placements.reduce((n, x) => n + x.lessons.length, 0), nWeak = p.weakSpots.filter(w => w.keep).length;
   return `<div class="reader stack-lg"><div class="stack"><span class="eyebrow">${esc(c.title || 'Course')}</span><h1>Here is the plan</h1>
     <div class="row">${p.found.map(f => chip(FOUND_LABEL[f] || f)).join('')}</div>${p.note ? `<p class="muted">${esc(p.note)}</p>` : ''}</div>
-  <div class="panel stack"><div class="field"><span>How much teaching</span>${seg('add.depth', DEPTH_OPTS, a.depth)}<span class="small muted">${DEPTH_HINT[a.depth] || ''}</span></div></div>
+  <div class="panel stack"><div class="field"><span>How much teaching</span>${seg('add.depth', DEPTH_OPTS, a.depth)}<span class="small muted">${DEPTH_HINT[a.depth] || ''}</span></div>${modelPicker()}</div>
   ${p.placements.length ? p.placements.map((pl, pi) => `<div class="panel plan-card stack"><div class="field"><span>Goes into</span><select id="plan-unit-${pi}" data-act-change="plan-unit" data-pi="${pi}">${us.map(u => `<option value="${u.id}" ${pl.unitId === u.id ? 'selected' : ''}>${esc(u.title)}</option>`).join('')}<option value="new" ${pl.unitId === 'new' ? 'selected' : ''}>A new module</option></select></div>
       ${pl.unitId === 'new' ? field('Name of the new module', `<input type="text" id="f-add-plan-placements-${pi}-newTitle" data-bind="add.plan.placements.${pi}.newTitle" value="${esc(pl.newTitle)}" maxlength="120">`) : ''}
       <div class="stack tight"><span class="small"><b>${plural(pl.lessons.length, 'topic')} to add</b></span>${pl.lessons.map((l, li) => `<div class="plan-lesson stack tight"><div class="row nowrap"><input type="text" id="f-add-plan-placements-${pi}-lessons-${li}-title" data-bind="add.plan.placements.${pi}.lessons.${li}.title" value="${esc(l.title)}" maxlength="120" aria-label="Topic title"><button type="button" class="btn sm ghost icon" data-act="plan-drop" data-pi="${pi}" data-li="${li}" aria-label="Leave this topic out">${icon('x')}</button></div><ul class="tightlist small muted">${l.ideas.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>`).join('')}</div></div>`).join('')
@@ -83,7 +84,7 @@ Object.assign(ACT, {
         const batch = []; let size = 0;
         while (i < segs.length && (size + segs[i].text.length <= 80000 || !batch.length)) { batch.push(segs[i]); size += segs[i].text.length; i++; }
         if (S.busy.add && segs.length > batch.length) { S.busy.add.label = `Reading what you pasted (part ${Math.min(i, segs.length)} of ${segs.length})…`; render(); }
-        const got = L.validateIntake(await ai(P.intake({ course: S.courses[cid], units, moduleHint: L.str(a.module, 120), segments: batch, planned: merged.placements.flatMap(p => p.lessons.map(l => p.unit + ' / ' + l.title)) }), { signal }));
+        const got = L.validateIntake(await ai(P.intake({ course: S.courses[cid], units, moduleHint: L.str(a.module, 120), segments: batch, planned: merged.placements.flatMap(p => p.lessons.map(l => p.unit + ' / ' + l.title)) }), { signal, build: true }));
         merged = mergePlans(merged, got);
       }
       for (const p of merged.placements) for (const l of p.lessons) l.segs = l.segs.filter(r => refs.has(r));

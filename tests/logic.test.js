@@ -313,3 +313,14 @@ test('add learning: intake plan validation and unit matching', () => {
   assert.equal(L.matchUnit('Prompting part 2', [{ id: 'x', title: 'Agents part 2' }]), null, 'a shared "part 2" does not join unrelated modules');
   assert.deepEqual(L.DEPTHS, ['refresher', 'full', 'review']);
 });
+
+test('build model: tiers, named models and safe fallbacks', () => {
+  assert.deepEqual(L.modelOpts('quick'), { modelTier: 'quick' }); assert.deepEqual(L.modelOpts('default'), { modelTier: 'default' }); assert.deepEqual(L.modelOpts('complex'), { modelTier: 'complex' });
+  assert.deepEqual(L.modelOpts('claude-fable-5-2'), { modelTier: 'complex', model: 'claude-fable-5-2' });
+  assert.deepEqual(L.modelOpts('other', ' claude-opus-5-5 '), { modelTier: 'complex', model: 'claude-opus-5-5' });
+  assert.deepEqual(L.modelOpts('other', ''), { modelTier: 'default' }, 'no id typed: the balanced tier');
+  assert.deepEqual(L.modelOpts('other', 'gpt-9 <script>'), { modelTier: 'default' }, 'only Claude ids pass');
+  assert.deepEqual(L.modelOpts('nonsense'), { modelTier: 'default' }); assert.deepEqual(L.modelOpts(undefined), { modelTier: 'default' });
+  assert.equal(L.settingsFor({ buildModel: 'complex' }).buildModel, 'complex'); assert.equal(L.settingsFor({ buildModel: 'x' }).buildModel, 'default'); assert.equal(L.settingsFor({ buildModelId: 7 }).buildModelId, '');
+  assert.equal(L.settingsFor({}).buildModel, 'default'); assert.ok(L.BUILD_MODELS.every(m => m.label && m.hint && ['quick', 'default', 'complex'].includes(m.tier)));
+});

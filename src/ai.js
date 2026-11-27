@@ -19,6 +19,8 @@ const aiOn = () => !!S.sample && !S.aiBlocked;
 async function ai(prompt, opts = {}) {
   if (!aiOn()) throw { code: 'no_ai', message: 'no sample capability' };
   const o = { modelTier: opts.tier || 'default', cache: false };
+  /* Course-building calls use the model the learner chose in Settings. */
+  if (opts.build) { const g = settingsFor(); Object.assign(o, L.modelOpts(g.buildModel, g.buildModelId)); }
   if (opts.signal) o.signal = opts.signal;
   if (opts.images && opts.images.length) o.images = opts.images;
   try { return await S.sample.json(prompt, o); }

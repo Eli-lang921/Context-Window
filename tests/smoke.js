@@ -58,7 +58,8 @@ function installMock(mode) {
     if (task === 'TRANSCRIBE') return { title: 'Photo', text: 'Transcribed text that is long enough to be accepted as material for the course.' };
     return {};
   };
-  const sample = Object.assign(async p => ({ text: JSON.stringify(answer(p)), truncated: false }), { json: async p => { await new Promise(r => setTimeout(r, 5)); return answer(p); }, limits: async () => ({ maxPromptBytes: 262144, images: { maxCount: 4, maxInputBytes: 1e6, mediaTypes: ['image/png'] } }) });
+  window.__opts = [];
+  const sample = Object.assign(async (p, o) => { window.__opts.push(['text', o && o.modelTier, o && o.model]); return { text: 'OK', truncated: false, modelTierApplied: (o && o.modelTier) || 'default', modelApplied: o && o.model === 'claude-fable-5-2' ? undefined : o && o.model }; }, { json: async (p, o) => { window.__opts.push([(/TASK: ([A-Z -]+)/.exec(typeof p === 'string' ? p : p.map(m => m.content).join('\n')) || [])[1], o && o.modelTier, o && o.model]); await new Promise(r => setTimeout(r, 5)); return answer(p); }, limits: async () => ({ maxPromptBytes: 262144, images: { maxCount: 4, maxInputBytes: 1e6, mediaTypes: ['image/png'] } }) });
   const caps = {
     db, sample, downloads: { save: async r => { window.__saved.push(r.filename); return { status: 'saved' }; } },
     tts: { speak: async l => { window.__spoken.push(l); return { playedMs: 1 }; }, stop: async () => { }, onState: () => () => { } }, dictation: null,
@@ -202,6 +203,12 @@ const fill = (page, id, v) => page.fill('#' + id, v);
     await goto(page, 'notebook'); await act(page, 'nb-review'); await act(page, 'session-end'); await goto(page, 'notebook');
     await goto(page, 'weekly'); await act(page, 'weekly-ai'); await goto(page, 'stats'); await goto(page, 'badges'); await goto(page, 'progress'); await goto(page, 'more');
     await goto(page, 'prefs'); await act(page, 'pref', '[data-val="deep"]'); await act(page, 'pref-rest', '[data-d="0"]'); await act(page, 'backup-make');
+    /* Model choice: a tier, a named model with a test, and a typed id; build calls carry it, grading calls do not. */
+    await act(page, 'pref', '[data-key="buildModel"][data-val="claude-fable-5-2"]'); await act(page, 'model-test');
+    step = 'model test'; if (!/most capable tier answered instead/.test(await page.locator('#view').innerHTML())) fail('model test did not report the fallback tier');
+    await act(page, 'pref', '[data-key="buildModel"][data-val="other"]'); await page.fill('#pref-model-id', 'claude-opus-5-5'); await page.locator('#pref-model-id').blur(); await page.waitForTimeout(80); await act(page, 'model-test');
+    if (!/Answered by claude-opus-5-5/.test(await page.locator('#view').innerHTML())) fail('model test did not name the model that answered');
+    await act(page, 'pref', '[data-key="buildModel"][data-val="complex"]');
     const pf = await page.evaluate(() => ({ g: S.settings.global, saved: window.__saved }));
     if (pf.g.probing !== 'deep' || pf.g.restDays[0] !== 0 || !pf.saved.some(f => /backup.*\.json$/.test(f))) fail('settings or backup failed');
     const rt = await page.evaluate(async () => { const b = await buildBackup(), n = Object.keys(S.cards).length; const ck = checkBackup(JSON.parse(JSON.stringify(b))); await drop('cards', Object.keys(S.cards)[0]); await restoreBackup(b, true); await new Promise(r => setTimeout(r, 60)); return { ok: ck.ok, same: Object.keys(S.cards).length === n, lessons: Object.keys(b.data.lessons).length, text: Object.keys(b.data.srctext).length, bad: checkBackup({ app: 'x' }).ok }; });
@@ -216,6 +223,7 @@ const fill = (page, id, v) => page.fill('#' + id, v);
     step = 'add plan'; html = await page.locator('#view').innerHTML();
     if (!/Here is the plan/.test(html) || !/Weak spots from the feedback/.test(html) || !/Already in your course/.test(html) || !/A new module/.test(html)) fail('plan screen incomplete');
     await fill(page, 'f-add-plan-placements-0-lessons-0-title', 'Tool use basics'); await act(page, 'add-approve');
+    step = 'add model'; { const o = await page.evaluate(() => window.__opts); const intake = o.filter(x => x[0] === 'INTAKE').pop(), grade = o.filter(x => x[0] === 'GRADE').pop(); if (!intake || intake[1] !== 'complex' || !grade || grade[1] !== 'quick') fail('model choice not applied to build calls only: ' + JSON.stringify([intake, grade])); }
     step = 'add build'; await page.waitForFunction(() => Object.values(S.units).some(u => /Module 3/.test(u.title) && (u.lessons || []).every(l => l.built)), null, { timeout: 15000 }); await idle(page);
     const ad = await page.evaluate(c => { const u = Object.entries(S.units).find(([, x]) => /Module 3/.test(x.title)), t = L.studyDay(); const tb = Object.values(S.cards).filter(k => k.unitId === u[0] && k.type === 'teachback'); return { route: S.route, lessons: u[1].lessons.map(l => [l.title, l.depth, l.built].join('|')), tbDue: tb.every(k => k.fsrs.due === t), tb: tb.length, fb: Object.values(S.mistakes).filter(m => m.kind === 'feedback').length, fbCard: Object.values(S.cards).filter(k => k.fromFeedback && k.fsrs.due === t).length, log: (S.courses[c].log || []).length, units: Object.keys(S.units).length, sources: Object.keys(S.sources).length, uid: u[0] }; }, cid);
     if (ad.route !== 'course' || ad.lessons.join() !== 'Tool use basics|review|true' || !ad.tbDue || ad.tb !== 1 || ad.fb !== 1 || ad.fbCard !== 1 || ad.log !== 1 || ad.units !== beforeAdd.units + 1 || ad.sources !== beforeAdd.sources + 1) fail('add learning result wrong: ' + JSON.stringify(ad));

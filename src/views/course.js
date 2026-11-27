@@ -222,7 +222,7 @@ async function draftSyllabus(cid) {
     if (c.mix.own) await digestSources(cid, signal, key);
     if (S.busy[key]) { S.busy[key].label = 'Drafting your syllabus…'; render(); }
     const digests = c.mix.own ? list('sources').filter(x => x.courseId === cid).flatMap(s => s.digest || []).slice(0, 500) : [];
-    const syl = L.validateSyllabus(await ai(P.syllabus({ course: c, outline: c.mix.outline ? c.outline : '', digests, mix: c.mix }), { signal }));
+    const syl = L.validateSyllabus(await ai(P.syllabus({ course: c, outline: c.mix.outline ? c.outline : '', digests, mix: c.mix }), { signal, build: true }));
     if (!syl.units.length) throw { code: 'empty_completion' };
     const refs = new Set(digests.map(d => d.ref));
     for (const u of unitsOf(cid)) if (u.status !== 'ready') await drop('units', u.id);
@@ -306,7 +306,7 @@ async function buildUnit(uid) {
     const material = c.mix.own ? await unitMaterialSmart(unit) : '';
     const label = t => { if (S.busy[key]) { S.busy[key].label = t; render(); } };
     if (!(unit.lessons || []).length) {
-      const r = await ai(P.unitPlan({ course: c, unit, others: unitsOf(cid).filter(u => u.id !== uid).map(u => u.title), material }), { signal });
+      const r = await ai(P.unitPlan({ course: c, unit, others: unitsOf(cid).filter(u => u.id !== uid).map(u => u.title), material }), { signal, build: true });
       const lessons = L.validateSyllabus({ units: [{ title: unit.title, lessons: r && r.lessons }] }).units[0].lessons.filter(l => l.ideas.length);
       if (!lessons.length) throw { code: 'empty_completion' };
       await patch('units', uid, { lessons }); unit = Object.assign({ id: uid }, S.units[uid]);
@@ -323,13 +323,13 @@ async function buildUnit(uid) {
       if (!lesSegs && les.sid && S.sources[les.sid]) lesSegs = Array.from({ length: num(S.sources[les.sid].segCount) }, (_, i) => les.sid + ':' + i);
       const lesMat = lesSegs ? await unitMaterial({ segs: lesSegs }) : material;
       label(`Writing topic ${n + 1} of ${N}: ${les.title}`);
-      const raw = await ai(P.lesson({ course: c, unit, lesson: les.ideas.length ? les : { title: les.title, ideas: [les.title] }, prior, material: lesMat, mix: c.mix, depth }), { signal });
+      const raw = await ai(P.lesson({ course: c, unit, lesson: les.ideas.length ? les : { title: les.title, ideas: [les.title] }, prior, material: lesMat, mix: c.mix, depth }), { signal, build: true });
       const ideas = L.arr(raw && raw.ideas, 5).map(L.validateIdea).filter(Boolean);
       if (!ideas.length) throw { code: 'invalid_json' };
       label(`Self-checking topic ${n + 1} of ${N}…`);
       let flags = [], checked = true;
       try {
-        const v = await ai(P.verify({ ideas: ideas.map(i => ({ title: i.title, analogy: i.analogy, mechanism: i.mechanism, example: i.example, why: i.why, keyPoints: i.keyPoints, cards: i.cards.map(k => ({ type: k.type, prompt: k.prompt, answer: k.answer, origin: k.origin })) })), material: lesMat }), { signal });
+        const v = await ai(P.verify({ ideas: ideas.map(i => ({ title: i.title, analogy: i.analogy, mechanism: i.mechanism, example: i.example, why: i.why, keyPoints: i.keyPoints, cards: i.cards.map(k => ({ type: k.type, prompt: k.prompt, answer: k.answer, origin: k.origin })) })), material: lesMat }), { signal, build: true });
         flags = L.arr(v && v.flags, 20).map(f => ({ idea: Number(f && f.idea), card: f && Number.isInteger(f.card) ? f.card : null, problem: L.str(f && f.problem, 500), severity: f && f.severity === 'high' ? 'high' : 'low' })).filter(f => f.problem && Number.isInteger(f.idea) && ideas[f.idea]);
       } catch (e) { if (signal.aborted) throw e; checked = false; }
       const doc = { courseId: cid, unitId: uid, n, title: les.title, depth, checked, createdAt: Date.now(), ideas: [] };

@@ -83,14 +83,14 @@ Object.assign(ACT, {
   'guide-export': async el => { const uid = el.dataset.uid, u = S.units[uid], c = S.courses[u.courseId] || { title: 'Course' }; const md = L.guideMarkdown(c, u, unitLessons(uid).filter(Boolean), u.guide, today()); await offerFile(L.slug(c.title + '-' + u.title) + '.md', md, md); },
   'guide-make': async el => {
     const uid = el.dataset.uid, u = S.units[uid];
-    const r = await task('guide-' + uid, 'Writing the cheat sheet…', signal => ai(P.guide({ course: S.courses[u.courseId], unit: u, ideas: unitIdeaBriefs(uid) }), { signal }));
+    const r = await task('guide-' + uid, 'Writing the cheat sheet…', signal => ai(P.guide({ course: S.courses[u.courseId], unit: u, ideas: unitIdeaBriefs(uid) }), { signal, build: true }));
     if (!r) return;
     const list5 = x => L.arr(x, 12).map(s => L.str(s, 400)).filter(Boolean);
     await patch('units', uid, { guide: { summary: L.str(r.summary, 800), mustKnow: list5(r.mustKnow), formulas: list5(r.formulas), pitfalls: list5(r.pitfalls) } }).catch(() => { }); render();
   },
   'recap-make': async el => {
     const uid = el.dataset.uid, u = S.units[uid];
-    const r = await task('guide-' + uid, 'Writing the audio recap…', signal => ai(P.recap({ course: S.courses[u.courseId], unit: u, ideas: unitIdeaBriefs(uid) }), { signal }));
+    const r = await task('guide-' + uid, 'Writing the audio recap…', signal => ai(P.recap({ course: S.courses[u.courseId], unit: u, ideas: unitIdeaBriefs(uid) }), { signal, build: true }));
     if (!r) return;
     const lines = L.arr(r.lines, 14).map(s => L.str(s, 1900)).filter(Boolean);
     if (!lines.length) { toast(AI_COPY.invalid_json, true); return; }
@@ -222,6 +222,9 @@ VIEWS.prefs = () => {
   <div class="panel stack"><h3>Teach-back</h3>
     <div class="field"><span>Probing depth</span>${seg('probing', PROBING, g.probing, 'pref')}<span class="small muted">How many follow-up questions before scoring. Deep adds edge cases and "why" chains.</span></div>
     <div class="field"><span>Grading strictness</span>${seg('strictness', STRICTNESS, g.strictness, 'pref')}<span class="small muted">Pass mark for a unit: lenient 60, standard 70, strict 80.</span></div></div>
+  <div class="panel stack"><h3>Model for building courses</h3><p class="small muted">Used when Claude files what you paste, writes lessons, runs the self-check and writes study guides. Grading, hints and the tutor keep the standard model so they stay quick.</p>
+    ${modelPicker()}
+    ${aiOn() ? `<div class="row"><button class="btn sm" data-act="model-test" ${isBusy('modeltest') ? 'disabled' : ''}>Test this choice</button>${UI.modelTest ? `<span class="small muted">${esc(UI.modelTest)}</span>` : ''}</div>${busyHtml('modeltest')}` : ''}</div>
   <div class="panel stack"><h3>Review schedule</h3>
     <div class="field"><span>Target retention</span>${seg('retention', [['0.85', '85%'], ['0.9', '90%'], ['0.93', '93%'], ['0.95', '95%']], String(g.retention), 'pref')}<span class="small muted">The chance you still remember a card when it comes due. Higher means more frequent reviews. The daily cap stays ${L.CAP} units, and the study day resets at 3 a.m.</span></div>
     <div class="field"><span>Weekly rest days</span><div class="seg" role="group">${DAYS.map((d, i) => `<button type="button" data-act="pref-rest" data-d="${i}" aria-pressed="${g.restDays.includes(i)}">${d}</button>`).join('')}</div><span class="small muted">Rest days don't break your streak. Their due cards roll to the next day.</span></div></div>
@@ -238,9 +241,21 @@ VIEWS.prefs = () => {
     ${bk.file ? `<div class="flag stack tight"><b>${esc(bk.note)}</b><label class="tick"><input type="checkbox" id="bk-erase" data-bind="bk.erase" ${bk.erase ? 'checked' : ''}><span>Erase what is here first, so the page matches the backup exactly</span></label><span class="small">${bk.erase ? 'Everything not in the backup is deleted. This can\'t be undone.' : 'Items in the backup overwrite items with the same id. Everything else stays.'}</span><div class="row"><button class="btn primary" data-act="backup-restore" ${isBusy('backup') ? 'disabled' : ''}>Restore now</button><button class="btn ghost" data-act="backup-cancel">Cancel</button></div></div>` : bk.note ? `<div class="small muted">${esc(bk.note)}</div>` : ''}${busyHtml('backup')}</div>
   <div class="panel stack tight"><h3>Sharing and reminders</h3><p class="small">Your data is visible only to you. To stop the page itself opening for others, set sharing to private from the artifact's Share menu.</p><p class="small">A daily phone reminder is set up outside this page: ask Claude in a chat to schedule one at the time you want.</p></div></div>`;
 };
+function modelPicker() {
+  const g = settingsFor(), cur = L.BUILD_MODELS.find(m => m.key === g.buildModel) || L.BUILD_MODELS[1];
+  return `<div class="field"><span>Model</span>${seg('buildModel', L.BUILD_MODELS.map(m => [m.key, m.label]), g.buildModel, 'pref')}<span class="small muted">${esc(cur.hint)}</span></div>
+    ${g.buildModel === 'other' ? field('Model id', `<input type="text" id="pref-model-id" value="${esc(g.buildModelId)}" maxlength="64" placeholder="claude-opus-5-5" data-act-change="pref-model-id" autocomplete="off" spellcheck="false">`, 'A Claude API model id, for example claude-sonnet-5-5. Use "Test this choice" in Settings to see which model actually answers.') : ''}`;
+}
 async function savePref(changes) { await put('settings', 'global', Object.assign({}, globalSettings(), changes)).catch(() => { }); render(); }
 Object.assign(ACT, {
-  'pref': el => { const k = el.dataset.key, v = el.dataset.val; savePref({ [k]: k === 'retention' || k === 'voiceRate' ? Number(v) : k === 'voiceOn' ? v === 'true' : v }); if (k === 'voiceOn' && v !== 'true') Voice.stop(); },
+  'pref': el => { const k = el.dataset.key, v = el.dataset.val; if (k === 'buildModel') UI.modelTest = ''; savePref({ [k]: k === 'retention' || k === 'voiceRate' ? Number(v) : k === 'voiceOn' ? v === 'true' : v }); if (k === 'voiceOn' && v !== 'true') Voice.stop(); },
+  'pref-model-id': el => { const v = el.value.trim().toLowerCase().slice(0, 64); UI.modelTest = ''; savePref({ buildModelId: v }); },
+  'model-test': async () => {
+    const g = settingsFor(), o = Object.assign({ cache: false }, L.modelOpts(g.buildModel, g.buildModelId));
+    UI.modelTest = '';
+    const r = await task('modeltest', 'Asking the model…', signal => S.sample('Reply with the single word OK.', Object.assign({ signal }, o)));
+    if (r) { UI.modelTest = r.modelApplied ? `Answered by ${r.modelApplied}.` : `${o.model ? 'That model could not answer here, so the ' : 'Answered by the '}${{ quick: 'fast', default: 'balanced', complex: 'most capable' }[r.modelTierApplied] || 'standard'} tier ${o.model ? 'answered instead' : ''}.`.replace(' .', '.'); render(); }
+  },
   'pref-rest': el => { const d = +el.dataset.d, cur = settingsFor().restDays; savePref({ restDays: cur.includes(d) ? cur.filter(x => x !== d) : cur.concat(d).sort() }); },
   'pref-mix': el => savePref({ mix: Object.assign({}, settingsFor().mix, { [el.dataset.k]: el.checked }) }),
   'pref-src': el => savePref({ sources: Object.assign({}, settingsFor().sources, { [el.dataset.k]: el.checked }) }),
