@@ -49,7 +49,7 @@ function planHtml(a) {
       ${pl.unitId === 'new' ? field('Name of the new module', `<input type="text" id="f-add-plan-placements-${pi}-newTitle" data-bind="add.plan.placements.${pi}.newTitle" value="${esc(pl.newTitle)}" maxlength="120">`) : ''}
       ${pl.kind === 'gaps' ? '<p class="small muted">Your material names these gaps but does not teach them, so Claude writes these topics from its own knowledge and labels them as added.</p>' : ''}
       ${pl.lessons.length ? `<div class="stack tight"><span class="small"><b>${plural(pl.lessons.length, 'topic')} to learn</b></span>${pl.lessons.map((l, li) => `<div class="plan-lesson stack tight"><div class="row nowrap"><input type="text" id="f-add-plan-placements-${pi}-lessons-${li}-title" data-bind="add.plan.placements.${pi}.lessons.${li}.title" value="${esc(l.title)}" maxlength="120" aria-label="Topic title"><button type="button" class="btn sm ghost icon" data-act="plan-drop" data-pi="${pi}" data-li="${li}" aria-label="Leave this topic out">${icon('x')}</button></div><ul class="tightlist small muted">${l.ideas.map(x => `<li>${esc(x)}</li>`).join('')}</ul>${p.weakSpots.some(w => w.keep && w.lesson === l) ? `<span class="small">${chip('Aimed at a weak spot', 'due')}</span>` : ''}</div>`).join('')}</div>` : ''}
-      ${pl.tasks.length ? `<div class="stack tight"><span class="small"><b>Exercise checklist</b> <span class="muted">(things to do, not to memorise)</span></span>${pl.tasks.map(t => `<div class="small"><b>${esc(t.title)}</b><ul class="tightlist muted">${t.criteria.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>`).join('')}</div>` : ''}</div>`).join('')
+      ${pl.tasks.length ? `<div class="stack tight"><span class="small"><b>Exercise checklist</b> <span class="muted">(things to do, not to memorise)</span></span>${pl.tasks.map(t => `<div class="small"><b>${esc(t.title)}</b>${(t.steps || []).length ? `<span class="muted"> · ${plural(t.steps.length, 'step')} kept</span>` : ''}<ul class="tightlist muted">${t.criteria.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>`).join('')}</div>` : ''}</div>`).join('')
     : `<div class="empty">${p.weakSpots.length ? 'No new topics to teach in this paste. The weak spots below can still be saved.' : 'Claude found nothing new to file. The course may already cover it, or the paste has no teachable content.'}</div>`}
   ${p.weakSpots.length ? `<div class="panel stack"><h3>Weak spots from the feedback</h3><p class="small muted">Each one goes in your mistake notebook. Where a topic above teaches it, that topic is aimed at the gap; otherwise it gets its own review card. Untick any that are wrong.</p>${p.weakSpots.map((w, i) => { const wl = weakLesson(p, w); return `<label class="tick"><input type="checkbox" id="ws-${i}" data-bind="add.plan.weakSpots.${i}.keep" ${w.keep ? 'checked' : ''}><span><b>${esc(w.idea || 'Feedback')}</b><br>${esc(w.gap)}${w.quote ? `<span class="quote small" style="display:block">“${esc(w.quote)}”</span>` : ''}<span class="small muted" style="display:block">${wl ? 'Covered by the topic: ' + esc(wl.l.title) : w.card ? 'Review card: ' + esc(cut(w.card.prompt, 160)) : ''}</span></span></label>`; }).join('')}</div>` : ''}
   ${p.skipped.length ? `<div class="stack tight"><h3>Already in your course</h3><ul class="tightlist small muted">${p.skipped.map(s => `<li>${esc(s.idea)}${s.reason ? ': ' + esc(s.reason) : ''}</li>`).join('')}</ul></div>` : ''}
@@ -58,6 +58,7 @@ function planHtml(a) {
 function mergePlans(into, more) {
   const norm = s => String(s || '').toLowerCase().trim();
   for (const p of more.placements) { const hit = into.placements.find(x => norm(x.unit) === norm(p.unit)); if (hit) { hit.lessons.push(...p.lessons); hit.tasks.push(...p.tasks); } else into.placements.push(p); }
+  for (const p of into.placements) p.tasks = p.tasks.slice(0, 8);
   for (const w of more.weakSpots) if (!into.weakSpots.some(x => norm(x.gap) === norm(w.gap))) into.weakSpots.push(w);
   for (const k of more.skipped) if (!into.skipped.some(x => norm(x.idea) === norm(k.idea))) into.skipped.push(k);
   for (const g of more.glossary) if (!into.glossary.some(x => norm(x.term) === norm(g.term))) into.glossary.push(g);
@@ -126,13 +127,14 @@ Object.assign(ACT, {
       const weak = plan.weakSpots.filter(w => w.keep);
       for (const p of plan.placements) {
         if (p.done) { if (p.doneUid && !touched.includes(p.doneUid)) { touched.push(p.doneUid); names.push((S.units[p.doneUid] || {}).title || ''); } continue; }
-        const add = p.lessons.filter(l => L.str(l.title)).map(l => ({ title: L.str(l.title, 120), ideas: l.ideas, segs: l.segs, depth, sid: a.sid, addedDay: t, gaps: weak.filter(w => w.lesson === l).map(w => w.gap).slice(0, 6) }));
-        const tasks = p.tasks.map(x => ({ title: x.title, criteria: x.criteria.map(text => ({ text, done: false })) }));
+        const kept = p.lessons.filter(l => L.str(l.title)), add = kept.map(l => Object.assign({ title: L.str(l.title, 120), ideas: l.ideas, segs: l.segs, depth, sid: a.sid, addedDay: t, gaps: weak.filter(w => w.lesson === l).map(w => w.gap).slice(0, 6) }, l.known ? { known: true } : {}));
+        const tasks = p.tasks.map(x => ({ title: x.title, steps: x.steps || [], criteria: x.criteria.map(text => ({ text, done: false })) }));
         if (!add.length && !tasks.length) continue;
         let uid = p.unitId !== 'new' && S.units[p.unitId] ? p.unitId : null;
+        const base = uid ? (S.units[uid].lessons || []).length : 0;
         if (uid) { const u = S.units[uid]; await patch('units', uid, Object.assign({ lessons: (u.lessons || []).concat(add), tasks: L.arr(u.tasks, 12).concat(tasks).slice(0, 12) }, add.length ? { passedAt: null, reviewOnly: false, status: u.status === 'draft' ? 'planned' : u.status } : {})); }
         else { uid = L.uid('u'); await put('units', uid, { courseId: cid, n: unitsOf(cid).length, title: L.str(p.newTitle, 120) || L.str(p.unit, 120) || 'New module', summary: '', lessons: add, tasks, kind: p.kind, segs: [], origin: p.kind === 'gaps' ? 'added' : 'source', status: 'planned', createdAt: Date.now() }); }
-        p.done = true; p.doneUid = uid;
+        p.done = true; p.doneUid = uid; kept.forEach((l, i) => { l.lid = uid + 'L' + (base + i); });
         if (!touched.includes(uid)) { touched.push(uid); names.push(S.units[uid].title); }
         if (add.length && !toBuild.includes(uid)) toBuild.push(uid);
         nLessons += add.length; nTasks += tasks.length;
@@ -144,14 +146,14 @@ Object.assign(ACT, {
         const wl = weakLesson(plan, w), wp = wl ? wl.p : w.unit && plan.placements.find(p => p.doneUid && [p.unit, p.newTitle].some(x => String(x || '').toLowerCase().trim() === w.unit.toLowerCase().trim()));
         const wHome = (wp && wp.doneUid) || (w.unit && L.matchUnit(w.unit, unitsOf(cid))) || null;
         let cardId = null;
-        if (!wl && w.card && !list('cards').some(k => k.courseId === cid && k.status !== 'retired' && k.type !== 'teachback' && L.nearDuplicate(k.prompt, w.card.prompt))) { cardId = L.uid('k'); await put('cards', cardId, L.newCard(Object.assign({}, w.card, { courseId: cid, unitId: wHome, ideaTitle: w.idea, quote: w.quote, origin: 'source', fromFeedback: true, createdAt: Date.now() + i, fsrs: Object.assign(L.newFsrs(), { due: t }) }))); }
-        await put('mistakes', L.uid('m'), { cardId, courseId: cid, unitId: wHome, ideaId: null, ideaTitle: w.idea, prompt: wl ? 'Topic: ' + wl.l.title : (w.card ? w.card.prompt : (w.idea || 'Feedback from your tutor')), given: '', why: w.gap + (w.quote ? ' Feedback said: "' + w.quote + '"' : ''), kind: 'feedback', guess: false, day: t, at: Date.now() + i });
+        if (!wl && w.card && !list('cards').some(k => k.courseId === cid && k.status !== 'retired' && k.type !== 'teachback' && L.nearDuplicate(k.prompt, w.card.prompt))) { cardId = L.uid('k'); await put('cards', cardId, L.newCard(Object.assign({}, w.card, { courseId: cid, unitId: wHome, ideaTitle: w.idea, quote: w.quote, origin: w.card.origin === 'source' && w.quote ? 'source' : 'added', fromFeedback: true, createdAt: Date.now() + i, fsrs: Object.assign(L.newFsrs(), { due: t }) }))); }
+        await put('mistakes', L.uid('m'), { cardId, courseId: cid, unitId: wHome, lessonId: wl ? wl.l.lid || null : null, ideaId: null, ideaTitle: w.idea, prompt: wl ? 'Topic: ' + wl.l.title : (w.card ? w.card.prompt : (w.idea || 'Feedback from your tutor')), given: '', why: w.gap + (w.quote ? ' Feedback said: "' + w.quote + '"' : ''), kind: 'feedback', guess: false, day: t, at: Date.now() + i });
         w.saved = true;
       }
       for (const g of plan.glossary) { const k = L.slug(g.term) + '~' + cid; if (!S.glossary[k]) await put('glossary', k, { term: g.term, def: g.def, fromSource: g.fromSource, courseId: cid, unitId: null, ideaId: null, ideaTitle: '' }); }
       if (S.sources[a.sid]) await patch('sources', a.sid, { staged: false });
       const title = (S.sources[a.sid] || {}).title || plan.title || 'Addition';
-      const summary = [nLessons ? plural(nLessons, 'topic') + ' in ' + names.filter(Boolean).join(', ') : '', nTasks ? plural(nTasks, 'exercise checklist') : '', weak.length ? plural(weak.length, 'weak spot') + ' from feedback' : ''].filter(Boolean).join(' · ');
+      const summary = [nLessons ? plural(nLessons, 'topic') + ' in ' + names.filter(Boolean).join(', ') : '', nTasks ? plural(nTasks, 'exercise') + ' to do' : '', weak.length ? plural(weak.length, 'weak spot') + ' from feedback' : ''].filter(Boolean).join(' · ');
       for (const id of a.inboxIds || []) drop('inbox', id).catch(() => { });
       await patch('courses', cid, Object.assign({ doneAt: null, mix: Object.assign({}, S.courses[cid].mix, { own: true }), log: [{ at: Date.now(), day: t, title, summary, depth }].concat(L.arr(S.courses[cid].log, 30)).slice(0, 30) }, plan.profile ? { profile: L.str([S.courses[cid].profile, plan.profile].filter(Boolean).join(' '), 1500) } : {}));
     } catch (e) { delete S.busy.add; render(); return; }

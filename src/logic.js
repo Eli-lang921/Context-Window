@@ -491,8 +491,8 @@ const L = (() => {
     raw = raw && typeof raw === 'object' ? raw : {};
     const placements = arr(raw.placements, 12).map(p => ({
       unit: str(p && p.unit, 120), isNew: !!(p && p.isNew), kind: p && p.kind === 'gaps' ? 'gaps' : 'course',
-      tasks: arr(p && p.tasks, 3).map(t => ({ title: str(t && t.title, 120) || 'Exercise', criteria: arr(t && t.criteria, 8).map(x => str(x, 500)).filter(Boolean) })).filter(t => t.criteria.length),
-      lessons: arr(p && p.lessons, 8).map(l => ({ title: str(l && l.title, 120), ideas: arr(l && l.ideas, 3).map(x => str(x, 160)).filter(Boolean), segs: arr(l && l.segs, 12).map(x => str(x, 60)).filter(Boolean) })).filter(l => l.title && l.ideas.length)
+      tasks: arr(p && p.tasks, 5).map(t => ({ title: str(t && t.title, 120) || 'Exercise', steps: arr(t && t.steps, 8).map(x => str(x, 500)).filter(Boolean), criteria: arr(t && t.criteria, 8).map(x => str(x, 500)).filter(Boolean) })).filter(t => t.criteria.length || t.steps.length),
+      lessons: arr(p && p.lessons, 8).map(l => ({ title: str(l && l.title, 120), ideas: arr(l && l.ideas, 3).map(x => str(x, 160)).filter(Boolean), segs: arr(l && l.segs, 12).map(x => str(x, 60)).filter(Boolean), known: !!(l && l.known === true) })).filter(l => l.title && l.ideas.length)
     })).filter(p => p.unit && (p.lessons.length || p.tasks.length));
     /* A tip on an answer the tutor already graded strong is not a weak spot. */
     const weakSpots = arr(raw.weakSpots, 24).filter(w => !(w && w.kind === 'refinement')).map(w => ({ idea: str(w && w.idea, 160), unit: str(w && w.unit, 120), topic: str(w && w.topic, 120), gap: str(w && w.gap, 500), quote: str(w && w.quote, 400), card: validateCard(w && w.card) })).filter(w => w.gap);
@@ -502,7 +502,7 @@ const L = (() => {
   }
   /* The self-check pass returns repairs, not just complaints. validateFixes cleans them; applyFixes applies what it
      safely can and leaves the rest as flags on the idea or card. */
-  const FIX_TARGETS = ['mechanism', 'analogy', 'example', 'why', 'keyPoints', 'card'];
+  const FIX_TARGETS = ['mechanism', 'analogy', 'example', 'why', 'keyPoints', 'hints', 'cloze', 'quote', 'card'];
   function validateFixes(raw, nIdeas) {
     return arr(raw && (raw.fixes || raw.flags), 30).map(f => {
       const idea = Number(f && f.idea); if (!Number.isInteger(idea) || idea < 0 || idea >= nIdeas) return null;
@@ -510,7 +510,7 @@ const L = (() => {
       const target = FIX_TARGETS.includes(f.target) ? f.target : card != null ? 'card' : 'mechanism';
       let example = null;
       if (f.example && typeof f.example === 'object') { const steps = arr(f.example.steps, 8).map(s => ({ label: str(s && s.label, 120), text: str(s && s.text, 800) })).filter(s => s.text); if (steps.length) example = { title: str(f.example.title, 120) || 'Worked example', steps, result: str(f.example.result, 600) }; }
-      return { idea, target, card: target === 'card' ? card : null, problem: str(f.problem, 500), severity: f.severity === 'high' ? 'high' : 'low', action: ['relabel', 'replace', 'drop', 'flag'].includes(f.action) ? f.action : 'flag',
+      return { idea, target, card: target === 'card' ? card : null, problem: str(f.problem, 500), severity: f.severity === 'high' ? 'high' : 'low', action: ['relabel', 'replace', 'drop', 'flag'].includes(f.action) ? f.action : 'flag', to: f.to === 'source' ? 'source' : 'added',
         text: str(f.text, 3000), example, points: arr(f.points, 6).map(x => str(x, 300)).filter(Boolean),
         cardFix: f.cardFix && typeof f.cardFix === 'object' ? { prompt: str(f.cardFix.prompt, 2000), answer: str(f.cardFix.answer, 2500), explanation: str(f.cardFix.explanation, 1200) } : null };
     }).filter(f => f && f.problem);
@@ -520,13 +520,15 @@ const L = (() => {
     for (const i of ideas) { i.flags = i.flags || []; i.cards = i.cards || []; }
     for (const f of fixes) {
       const i = ideas[f.idea], c = f.target === 'card' && f.card != null ? i.cards[f.card] : null; let ok = false;
-      if (f.action === 'relabel') { const part = c || i[f.target]; if (part && typeof part === 'object' && !Array.isArray(part)) { part.origin = 'added'; ok = true; } }
+      if (f.action === 'relabel') { const part = c || i[f.target]; if (part && typeof part === 'object' && !Array.isArray(part)) { part.origin = f.to || 'added'; ok = true; } }
       else if (f.action === 'replace') {
         if (['mechanism', 'why', 'analogy'].includes(f.target) && f.text && i[f.target]) { i[f.target].text = f.text; ok = true; }
         else if (f.target === 'example' && f.example) { i.example = Object.assign({}, f.example, { origin: i.example ? i.example.origin : 'added' }); ok = true; }
         else if (f.target === 'keyPoints' && f.points.length >= 2) { i.keyPoints = f.points; ok = true; }
+        else if (f.target === 'hints' && f.points.length) { i.hints = f.points.slice(0, 2); ok = true; }
+        else if (f.target === 'cloze') { const ans = f.points[0] || ''; if (f.text && ans.length >= 4 && f.text.toLowerCase().includes(ans.toLowerCase())) { i.cloze = { sentence: f.text, answer: ans }; ok = true; } }
         else if (c && f.cardFix && f.cardFix.prompt && f.cardFix.answer) { c.prompt = f.cardFix.prompt; c.answer = f.cardFix.answer; if (f.cardFix.explanation) c.explanation = f.cardFix.explanation; ok = true; }
-      } else if (f.action === 'drop') { if (c) { (drop[f.idea] = drop[f.idea] || new Set()).add(f.card); ok = true; } else if (f.target === 'analogy' && i.analogy) { i.analogy = null; ok = true; } }
+      } else if (f.action === 'drop') { if (c) { (drop[f.idea] = drop[f.idea] || new Set()).add(f.card); ok = true; } else if (f.target === 'analogy' && i.analogy) { i.analogy = null; ok = true; } else if (f.target === 'cloze') { i.cloze = null; ok = true; } else if (f.target === 'quote') { i.quote = ''; ok = true; } else if (f.target === 'hints') { i.hints = []; ok = true; } }
       if (ok) { applied++; continue; }
       open++;
       if (c) c.flag = f.problem; else i.flags.push({ problem: f.problem, severity: f.severity });

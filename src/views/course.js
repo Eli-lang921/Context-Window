@@ -323,25 +323,30 @@ async function buildUnit(uid) {
       if (!lesSegs && les.sid && S.sources[les.sid]) lesSegs = Array.from({ length: num(S.sources[les.sid].segCount) }, (_, i) => les.sid + ':' + i);
       const lesMat = lesSegs ? await unitMaterial({ segs: lesSegs }) : material;
       /* Every lesson is told what the rest of the course teaches and how it defines its terms, so ideas are not repeated or contradicted. */
-      const others = [...new Set(list('cards').filter(k => k.courseId === cid && k.type === 'teachback' && k.unitId !== uid && k.status !== 'retired').map(k => k.ideaTitle).concat(unitsOf(cid).filter(u => u.id !== uid).flatMap(u => (u.lessons || []).filter(l => !l.built).flatMap(l => l.ideas || []))))].filter(Boolean).slice(0, 80);
+      const tbs = list('cards').filter(k => k.courseId === cid && k.type === 'teachback' && k.unitId !== uid && k.status !== 'retired'), nOf = id => num((S.units[id] || {}).n);
+      /* Earlier ideas may be built on and compared with; ideas other topics own must not be taught again. */
+      const earlier = [...new Set(tbs.filter(k => nOf(k.unitId) < num(unit.n)).map(k => k.ideaTitle).concat(prior))].filter(Boolean).slice(-40);
+      const others = [...new Set(tbs.filter(k => nOf(k.unitId) >= num(unit.n)).map(k => k.ideaTitle).concat(unitsOf(cid).filter(u => u.id !== uid).flatMap(u => (u.lessons || []).filter(l => !l.built).flatMap(l => l.ideas || [])), unit.lessons.filter((l, k) => k > n).flatMap(l => l.ideas || [])))].filter(x => x && !earlier.includes(x)).slice(0, 80);
       const glossary = list('glossary').filter(g => g.courseId === cid).slice(0, 40).map(g => ({ term: g.term, def: g.def }));
       label(`Writing topic ${n + 1} of ${N}: ${les.title}`);
-      const raw = await ai(P.lesson({ course: c, unit, lesson: les.ideas.length ? les : { title: les.title, ideas: [les.title] }, prior, material: lesMat, mix: c.mix, depth, others, glossary, profile: L.str(c.profile, 1500), gaps: L.arr(les.gaps, 6), kind: unit.kind }), { signal, build: true });
+      const raw = await ai(P.lesson({ course: c, unit, lesson: les.ideas.length ? les : { title: les.title, ideas: [les.title] }, prior, material: lesMat, mix: c.mix, depth, others, earlier, glossary, profile: L.str(c.profile, 1500), gaps: L.arr(les.gaps, 6), kind: unit.kind, known: !!les.known }), { signal, build: true });
       let ideas = L.arr(raw && raw.ideas, 5).map(L.validateIdea).filter(Boolean);
       if (!ideas.length) throw { code: 'invalid_json' };
       label(`Self-checking topic ${n + 1} of ${N}…`);
       /* The self-check returns repairs. What it can fix is fixed before you see it; only what it cannot fix is flagged. */
       let checked = true, fixed = 0;
       try {
-        const v = await ai(P.verify({ ideas: ideas.map(i => ({ title: i.title, analogy: i.analogy, mechanism: i.mechanism, example: i.example, why: i.why, keyPoints: i.keyPoints, hints: i.hints, cards: i.cards.map(k => ({ type: k.type, prompt: k.prompt, answer: k.answer, origin: k.origin })) })), material: lesMat, glossary }), { signal, build: true });
+        const v = await ai(P.verify({ ideas: ideas.map(i => ({ title: i.title, analogy: i.analogy, mechanism: i.mechanism, example: i.example, why: i.why, keyPoints: i.keyPoints, hints: i.hints, cards: i.cards.map(k => ({ type: k.type, prompt: k.prompt, answer: k.answer, origin: k.origin })) })), material: lesMat, glossary, profile: L.str(c.profile, 1500), gaps: L.arr(les.gaps, 6) }), { signal, build: true });
         const r = L.applyFixes(ideas, L.validateFixes(v, ideas.length)); ideas = r.ideas; fixed = r.applied;
       } catch (e) { if (signal.aborted) throw e; checked = false; }
       const doc = { courseId: cid, unitId: uid, n, title: les.title, depth, checked, fixed, createdAt: Date.now(), ideas: [] };
       const seen = list('cards').filter(k => k.courseId === cid && k.status !== 'retired' && k.type !== 'teachback').map(k => k.prompt);
+      const clozes = list('cards').filter(k => k.courseId === cid && k.cloze).map(k => k.cloze.sentence);
       for (let k = 0; k < ideas.length; k++) {
         const idea = ideas[k], ideaId = lid + 'i' + k;
         const cards = idea.cards || []; delete idea.cards;
         idea.id = ideaId; idea.flags = idea.flags || [];
+        if (idea.cloze) { if (clozes.some(x => L.nearDuplicate(x, idea.cloze.sentence))) idea.cloze = null; else clozes.push(idea.cloze.sentence); }
         doc.ideas.push(idea);
         const common = { courseId: cid, unitId: uid, lessonId: lid, ideaId, ideaTitle: idea.title, yield: idea.yield, createdAt: Date.now() + k };
         const tbId = ideaId + 't', fsrs = () => (early ? Object.assign(L.newFsrs(), { due: t }) : L.newFsrs());
@@ -367,16 +372,16 @@ async function buildUnit(uid) {
     return true;
   });
 }
-function tasksHtml(u) {
+function tasksHtml(u, openByDefault) {
   const ts = L.arr(u.tasks, 12); if (!ts.length) return '';
-  const all = ts.flatMap(x => x.criteria || []), done = all.filter(x => x.done).length, open = ui('tasks-' + u.id, false);
-  return `<div class="tasks stack tight"><button type="button" class="linkbtn small" data-act="toggle" data-key="tasks-${u.id}" aria-expanded="${!!open}">Exercise checklist: ${done} of ${all.length} done ${open ? '(hide)' : '(show)'}</button>
-  ${open ? ts.map((x, ti) => `<div class="stack tight"><b class="small">${esc(x.title)}</b>${(x.criteria || []).map((k, ci) => `<label class="tick small"><input type="checkbox" id="tk-${u.id}-${ti}-${ci}" data-act-change="task-tick" data-uid="${u.id}" data-t="${ti}" data-c="${ci}" ${k.done ? 'checked' : ''}><span>${esc(k.text)}</span></label>`).join('')}</div>`).join('') : ''}</div>`;
+  const all = ts.flatMap(x => x.criteria || []), done = all.filter(x => x.done).length, open = ui('tasks-' + u.id, !!openByDefault);
+  return `<div class="tasks stack tight"><button type="button" class="btn sm ghost tasks-toggle" data-act="toggle" data-key="tasks-${u.id}" aria-expanded="${!!open}">${icon('check')}<span>${plural(ts.length, 'exercise')} to do · ${done} of ${all.length} checks ticked</span><span class="muted">${open ? 'Hide' : 'Show'}</span></button>
+  ${open ? ts.map((x, ti) => `<div class="stack tight"><b class="small">${esc(x.title)}</b>${(x.steps || []).length ? `<ol class="tightlist small muted">${x.steps.map(st => `<li>${esc(st)}</li>`).join('')}</ol><span class="small muted">Done when:</span>` : ''}${(x.criteria || []).map((k, ci) => `<label class="tick small"><input type="checkbox" id="tk-${u.id}-${ti}-${ci}" data-act-change="task-tick" data-uid="${u.id}" data-t="${ti}" data-c="${ci}" ${k.done ? 'checked' : ''}><span>${esc(k.text)}</span></label>`).join('')}</div>`).join('') : ''}</div>`;
 }
-function feedbackRow(cid) {
+function feedbackRow(cid, noReview) {
   const notes = list('mistakes').filter(m => m.kind === 'feedback' && (!cid || m.courseId === cid)).length; if (!notes) return '';
   const cards = list('cards').filter(k => k.fromFeedback && k.status === 'active' && (!cid || k.courseId === cid)).length;
-  return `<div class="note row between"><span class="grow"><b>From your tutor's feedback: ${plural(notes, 'weak spot')}.</b> ${cards ? plural(cards, 'review card') + ' aimed at them; the rest steer the topics that teach them.' : 'The topics that teach them are aimed at these gaps.'}</span><span class="row">${cards ? `<button class="btn sm" data-act="fb-review" data-cid="${esc(cid || '')}">Review these</button>` : ''}<a class="btn sm ghost" href="#notebook">See them</a></span></div>`;
+  return `<div class="note fbrow"><span><b>From your tutor's feedback: ${plural(notes, 'weak spot')}.</b> ${cards ? plural(cards, 'review card') + ' aimed at them; the rest steer the topics that teach them.' : 'The topics that teach them are aimed at these gaps.'}</span><span class="row">${cards && !noReview ? `<button class="btn sm" data-act="fb-review" data-cid="${esc(cid || '')}">Review these</button>` : ''}<a class="btn sm ghost" href="#notebook">See them</a></span></div>`;
 }
 
 /* ---------- Course page ---------- */
@@ -412,7 +417,7 @@ VIEWS.course = cid => {
   const tools = [[`#test-${cid}`, 'Practice test', 'Quick test or full exam simulation'], [`#games-${cid}`, 'Games', 'Match, fill the blank, speed round, quiz board'], [`#cram-${cid}`, 'Cram mode', 'High-yield review before a deadline'],
     !c.placementDone && !anyBuilt && us.length && aiOn() ? [`#placement-${cid}`, 'Placement test', 'Skip modules you already know'] : null, [`#syllabus-${cid}`, 'Edit modules', 'Rename, reorder, add or cut']].filter(Boolean);
   return `<div class="stack-lg">${head}
-  <div class="row actions">${nx ? (nx.build ? `<button class="btn primary" data-act="unit-build" data-uid="${nx.unit.id}" ${aiOn() && !isBusy('build-' + nx.unit.id) ? '' : 'disabled'}>Build: ${esc(cut(nx.unit.title, 40))}</button>` : `<a class="btn primary" href="#learn-${nx.lid}">Continue: ${esc(cut(((nx.unit.lessons || [])[+nx.lid.split('L').pop()] || {}).title || nx.unit.title, 44))}</a>`) : ''}
+  <div class="row actions">${nx ? (nx.build ? `<button class="btn primary" data-act="unit-build" data-uid="${nx.unit.id}" ${aiOn() && !isBusy('build-' + nx.unit.id) ? '' : 'disabled'}>Build: ${esc(cut(nx.unit.title, 40))}</button>` : `<a class="btn primary" href="#learn-${nx.lid}">Continue: ${esc(cut(((nx.unit.lessons || [])[+nx.lid.split('L').pop()] || {}).title || nx.unit.title, 90))}</a>`) : ''}
     <a class="btn ${nx ? '' : 'primary'}" href="#add-${cid}">${icon('plus')}<span>Add learning</span></a></div>
   <div class="row quiet"><button class="btn sm ghost" data-act="tutor-open">${icon('chat')}<span>Tutor</span></button><a class="btn sm ghost" href="#map-${cid}">Mind map</a><button class="btn sm ghost" data-act="toggle" data-key="cmenu-${cid}" aria-expanded="${!!menu}">${menu ? 'Hide tools' : 'More tools'}</button></div>
   ${menu ? `<div class="menu">${tools.map(([h, t, d]) => `<a href="${h}"><b>${t}</b><span class="small muted">${d}</span></a>`).join('')}<button type="button" data-act="set" data-key="ctab-${cid}" data-val="material"><b>Sources</b><span class="small muted">What you have added</span></button><button type="button" data-act="set" data-key="ctab-${cid}" data-val="options"><b>Course options</b><span class="small muted">Strictness, probing, pace, delete</span></button></div>` : ''}
@@ -421,11 +426,11 @@ VIEWS.course = cid => {
   ${p.mode === 'deadline' && p.status !== 'done' && p.status !== 'past' && us.length ? `<div class="note"><b>Today's plan:</b> ${plural(p.lessonsPerDay, 'lesson')}, about ${p.minutesNeeded} minutes with review. You set aside ${num(c.minutesPerDay)} minutes a day.${p.status === 'behind' ? ' That is more than your daily time, so the target date is at risk: add minutes, move the date, or cut modules.' : ''}</div>` : ''}
   ${p.cramSuggested && !c.cram ? `<div class="note row between"><span><b>${p.daysLeft} days to your target date.</b> Cram mode reviews only the highest-yield ideas, on top of daily review.</span><button class="btn sm" data-act="cram-on" data-cid="${cid}">Turn on cram mode</button></div>` : ''}
   ${us.length ? `<div class="stack"><h2>Modules</h2>${us.map((u, i) => { const up = unitProgress(u), bkey = 'build-' + u.id; const gate = i > 0 && !us[i - 1].passedAt && !u.passedAt && !up.built;
-    return `<div class="panel stack tight unit"><div class="row between"><h3 class="grow">${esc(u.title)}</h3><div class="row">${u.reviewOnly ? chip('Review only', 'accent') : ''}${u.passedAt ? chip('Passed' + (u.passScore ? ' · ' + num(u.passScore) : ''), 'good') : up.built && up.total && up.done === up.total && !up.pending ? chip('Below pass mark · ' + up.avg, 'due') : ''}${u.kind === 'gaps' ? chip('From your assessment', 'added') : u.origin === 'added' ? chip('Added by Claude', 'added') : ''}</div></div>
+    return `<div class="panel stack tight unit"><div class="row between"><h3 class="grow">${esc(u.title)}</h3><div class="row">${u.reviewOnly ? chip('Review only', 'accent') : ''}${u.passedAt ? chip('Passed' + (u.passScore ? ' · ' + num(u.passScore) : ''), 'good') : up.built && up.total && up.done === up.total && !up.pending ? chip('Below pass mark · ' + up.avg, 'due') : ''}${u.kind === 'gaps' ? chip('Written by Claude, not in your course', 'added') : u.origin === 'added' ? chip('Added by Claude', 'added') : ''}${(u.lessons || []).some(l => (l.gaps || []).length) ? chip(plural((u.lessons || []).reduce((k, l) => k + (l.gaps || []).length, 0), 'weak spot') + ' aimed here', 'due') : ''}</div></div>
       ${u.summary ? `<p class="small muted">${esc(u.summary)}</p>` : ''}${gate ? `<div class="small muted">Recommended after you pass the module before it. You can still start it now.</div>` : ''}
       ${up.total ? bar(100 * up.done / up.total) : ''}
-      ${(u.lessons || []).length ? `<ol class="lessons small">${u.lessons.map((l, n) => { const lid = u.id + 'L' + n; return `<li>${l.built ? `<a href="#learn-${lid}">${esc(l.title)}</a>` : `<span class="muted">${esc(l.title)}</span>`} ${!l.built ? chip('Not built yet') : l.depth === 'review' ? chip('Review cards only') : lessonDone(lid) ? chip('Done', 'good') : nx && nx.lid === lid ? chip('Next', 'accent') : ''}${(l.gaps || []).length ? ' ' + chip('Aimed at a weak spot', 'due') : ''}</li>`; }).join('')}</ol>` : '<span class="small muted">Topics are planned when you build this module.</span>'}
-      ${tasksHtml(u)}
+      ${(u.lessons || []).length ? `<ol class="lessons small">${u.lessons.map((l, n) => { const lid = u.id + 'L' + n; return `<li>${l.built ? `<a href="#learn-${lid}">${esc(l.title)}</a>` : `<span class="muted">${esc(l.title)}</span>`} ${!l.built ? chip('Not built yet') : l.depth === 'review' ? chip('Review cards only') : lessonDone(lid) ? chip('Done', 'good') : nx && nx.lid === lid ? chip('Next', 'accent') : ''}${l.known && !lessonDone(lid) ? ' ' + chip('Your tutor rated you strong here') : ''}</li>`; }).join('')}</ol>` : '<span class="small muted">Topics are planned when you build this module.</span>'}
+      ${tasksHtml(u, nx ? nx.unit.id === u.id : false)}
       <div class="row">${up.pending || (!up.lessons && !(u.tasks || []).length) ? (aiOn() ? `<button class="btn sm ${isBusy(bkey) ? '' : 'primary'}" data-act="unit-build" data-uid="${u.id}" ${isBusy(bkey) ? 'disabled' : ''}>${up.built ? `Build ${plural(up.pending, 'new topic')}` : 'Build this module'}</button>` : needAI) : ''}${up.built ? `<a class="btn sm ghost" href="#guide-${u.id}">Study guide and audio recap</a>` : ''}</div>${busyHtml(bkey)}</div>`; }).join('')}</div>`
     : `<div class="empty stack"><b>This course is empty.</b><span>Paste what you have learned and Claude will file it into modules and topics, then teach and review it with you.</span><div><a class="btn primary" href="#add-${cid}">Add your first learning</a></div></div>`}
   ${log.length ? `<div class="stack tight"><h2>Recently added</h2><div class="panel list">${log.slice(0, 10).map(x => `<div class="row between"><span class="grow"><b>${esc(x.title)}</b><br><span class="small muted">${esc(x.summary || '')}</span></span><span class="small muted">${esc(x.day || '')}</span></div>`).join('')}</div></div>` : ''}</div>`;

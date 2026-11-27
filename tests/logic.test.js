@@ -360,3 +360,20 @@ test('self-check repairs: relabel, replace, drop, and what stays flagged', () =>
   assert.equal(L.validateIdea({ title: 't', mechanism: 'm', keyPoints: ['a', 'b'], cloze: { sentence: 'This fails if ___.', answer: 'fails' } }).cloze, null);
   assert.equal(L.validateIdea({ title: 't', mechanism: 'm', keyPoints: ['a', 'b'], cloze: { sentence: 'It is what it is.', answer: 'what' } }).cloze, null, 'stop words are not blanks');
 });
+
+test('self-check repairs reach hints, cloze, quote and labels', () => {
+  const idea = { title: 'T', mechanism: { text: 'm', origin: 'source' }, example: { title: 'e', steps: [{ label: '', text: 's' }], result: 'r', origin: 'added' }, why: { text: 'w', origin: 'added' }, analogy: null, keyPoints: ['a', 'b', 'c'], hints: ['gives it away', 'second'], cloze: { sentence: 'He said volume was small.', answer: 'volume' }, quote: 'a remark about the learner', cards: [] };
+  const fixes = L.validateFixes({ fixes: [
+    { idea: 0, target: 'hints', action: 'replace', problem: 'hint states a key point', points: ['Where does the copy live?', 'Who can write to it?'] },
+    { idea: 0, target: 'cloze', action: 'replace', problem: 'about the learner', text: 'A backup outside write scope survives a bad run.', points: ['backup'] },
+    { idea: 0, target: 'quote', action: 'drop', problem: 'quote is about the learner' },
+    { idea: 0, target: 'example', action: 'relabel', to: 'source', problem: 'restates the material' },
+    { idea: 0, target: 'cloze', action: 'replace', problem: 'bad', text: 'No answer inside.', points: ['zzzz'] }
+  ] }, 1);
+  const r = L.applyFixes([idea], fixes);
+  assert.equal(r.applied, 4); assert.equal(r.open, 1);
+  assert.deepEqual(r.ideas[0].hints, ['Where does the copy live?', 'Who can write to it?']);
+  assert.equal(r.ideas[0].cloze.answer, 'backup'); assert.equal(r.ideas[0].quote, ''); assert.equal(r.ideas[0].example.origin, 'source');
+  const plan = L.validateIntake({ placements: [{ unit: 'M1', tasks: [{ title: 'Runbook', steps: ['What it does', 'Kill condition'], criteria: [] }], lessons: [{ title: 'A', ideas: ['x'], known: true }] }] });
+  assert.deepEqual(plan.placements[0].tasks[0].steps, ['What it does', 'Kill condition']); assert.equal(plan.placements[0].lessons[0].known, true);
+});

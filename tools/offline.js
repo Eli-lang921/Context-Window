@@ -52,8 +52,8 @@ function loadPlan() {
       let uid = L.matchUnit(p.unit, units) || (s.module && merged.placements.length === 1 ? L.matchUnit(s.module, units) : null);
       if (!uid) { uid = 'uaic' + (units.length + 1); units.push({ id: uid, title: p.unit, kind: p.kind, lessons: [], tasks: [] }); }
       const u = units.find(x => x.id === uid); byPlacement.set(p, u);
-      for (const l of p.lessons) { const les = { title: l.title, ideas: l.ideas, segs: l.segs.filter(r => refs.has(r)), depth: DEPTH, sid: s.sid, addedDay: T, gaps: [] }; l.out = les; u.lessons.push(les); }
-      u.tasks.push(...p.tasks.map(x => ({ title: x.title, criteria: x.criteria.map(text => ({ text, done: false })) })));
+      for (const l of p.lessons) { const les = Object.assign({ title: l.title, ideas: l.ideas, segs: l.segs.filter(r => refs.has(r)), depth: DEPTH, sid: s.sid, addedDay: T, gaps: [] }, l.known ? { known: true } : {}); l.out = les; l.lid = u.id + 'L' + u.lessons.length; u.lessons.push(les); }
+      u.tasks.push(...p.tasks.map(x => ({ title: x.title, steps: x.steps || [], criteria: x.criteria.map(text => ({ text, done: false })) })));
       if (!touched.includes(u.title)) touched.push(u.title);
       stats.placements++; stats.lessons += p.lessons.length; stats.tasks += p.tasks.length;
     }
@@ -66,7 +66,7 @@ function loadPlan() {
       if (les) { if (les.out.gaps.length < 6) les.out.gaps.push(w.gap); stats.weakLinked++; }
       else if (w.card) stats.weakOwnCard++;
       else { stats.weakNoCard++; w.card = L.validateCard({ type: 'short', prompt: `Your tutor's feedback flagged a gap${w.idea ? ' on "' + w.idea + '"' : ''}. Close it: what should you do or say instead?`, answer: w.gap, explanation: w.gap, origin: 'source', difficulty: 3 }); }
-      weak.push({ sid: s.sid, idea: w.idea, gap: w.gap, quote: w.quote, card: les ? null : w.card, unitId: wu ? wu.id : null, unitTitle: wu ? wu.title : '', topic: les ? les.title : '' });
+      weak.push({ sid: s.sid, idea: w.idea, gap: w.gap, quote: w.quote, card: les ? null : w.card, unitId: wu ? wu.id : null, unitTitle: wu ? wu.title : '', topic: les ? les.title : '', lessonId: les ? les.lid : null });
     }
     for (const g of merged.glossary) if (!glossary.some(x => norm(x.term) === norm(g.term))) glossary.push(g);
     profile = [profile, merged.profile].filter(Boolean).join(' ').slice(0, 1500);
@@ -84,9 +84,9 @@ if (step === 'plan') {
   for (const u of plan.units) {
     const prior = [];
     /* The app builds one topic at a time and tells each about the rest of the course; here every other module's planned ideas stand in for that. */
-    const others = [...new Set(plan.units.filter(x => x.id !== u.id).flatMap(x => x.lessons.flatMap(l => l.ideas)))].slice(0, 80);
+    const ui = plan.units.indexOf(u), before = plan.units.slice(0, ui).flatMap(x => x.lessons.flatMap(l => l.ideas)), after = plan.units.slice(ui + 1).flatMap(x => x.lessons.flatMap(l => l.ideas));
     u.lessons.forEach((les, k) => {
-      wr(`prompts/lesson-${u.id}L${k}.txt`, P.lesson({ course: Object.assign({}, COURSE, { profile: plan.profile }), unit: u, lesson: les, prior: prior.slice(), material: material(lessonRefs(les)), mix: COURSE.mix, depth: les.depth, others, glossary: glossOf(plan), profile: plan.profile, gaps: les.gaps, kind: u.kind })); n++;
+      wr(`prompts/lesson-${u.id}L${k}.txt`, P.lesson({ course: Object.assign({}, COURSE, { profile: plan.profile }), unit: u, lesson: les, prior: prior.slice(), material: material(lessonRefs(les)), mix: COURSE.mix, depth: les.depth, earlier: [...new Set(before.concat(prior))].slice(-40), others: [...new Set(after.concat(u.lessons.slice(k + 1).flatMap(l => l.ideas)))].slice(0, 80), glossary: glossOf(plan), profile: plan.profile, gaps: les.gaps, kind: u.kind, known: !!les.known })); n++;
       prior.push(...les.ideas);
     });
   }
@@ -111,7 +111,7 @@ if (step === 'verify') {
   const plan = JSON.parse(rd('plan.json')), { lessons, stats } = loadLessons(plan);
   for (const x of lessons) {
     if (!x.ideas.length) continue;
-    wr(`prompts/verify-${x.lid}.txt`, P.verify({ ideas: x.ideas.map(i => ({ title: i.title, analogy: i.analogy, mechanism: i.mechanism, example: i.example, why: i.why, keyPoints: i.keyPoints, hints: i.hints, cards: i.cards.map(k => ({ type: k.type, prompt: k.prompt, answer: k.answer, origin: k.origin })) })), material: material(lessonRefs(x.les)), glossary: glossOf(plan) }));
+    wr(`prompts/verify-${x.lid}.txt`, P.verify({ ideas: x.ideas.map(i => ({ title: i.title, analogy: i.analogy, mechanism: i.mechanism, example: i.example, why: i.why, keyPoints: i.keyPoints, hints: i.hints, cards: i.cards.map(k => ({ type: k.type, prompt: k.prompt, answer: k.answer, origin: k.origin })) })), material: material(lessonRefs(x.les)), glossary: glossOf(plan), profile: plan.profile, gaps: x.les.gaps }));
   }
   console.log(JSON.stringify(stats, null, 1));
 }
@@ -119,8 +119,8 @@ if (step === 'verify') {
 if (step === 'assemble') {
   const plan = JSON.parse(rd('plan.json')), { lessons, stats } = loadLessons(plan), db = {};
   const put = (col, id, doc) => { (db[col] = db[col] || {})[id] = doc; };
-  let nFlags = 0, nFixed = 0, nFixesRaw = 0, unchecked = 0, dupCards = 0; const seen = [], fixLog = [];
-  put('courses', CID, Object.assign({}, COURSE, { status: 'active', createdAt: NOW, startedDay: T, profile: plan.profile, log: plan.log.slice().reverse().map((x, i) => ({ at: NOW - i, day: T, title: x.title, summary: [x.lessons ? `${x.lessons} topic${x.lessons === 1 ? '' : 's'} in ${x.units.join(', ')}` : '', x.tasks ? `${x.tasks} exercise checklist${x.tasks === 1 ? '' : 's'}` : '', x.weak ? `${x.weak} weak spot${x.weak === 1 ? '' : 's'} from feedback` : ''].filter(Boolean).join(' · '), depth: DEPTH })) }));
+  let nFlags = 0, nFixed = 0, nFixesRaw = 0, unchecked = 0, dupCards = 0, dupCloze = 0; const seen = [], clozes = [], fixLog = [];
+  put('courses', CID, Object.assign({}, COURSE, { status: 'active', createdAt: NOW, startedDay: T, profile: plan.profile, log: plan.log.slice().reverse().map((x, i) => ({ at: NOW - i, day: T, title: x.title, summary: [x.lessons ? `${x.lessons} topic${x.lessons === 1 ? '' : 's'} in ${x.units.join(', ')}` : '', x.tasks ? `${x.tasks} exercise${x.tasks === 1 ? '' : 's'} to do` : '', x.weak ? `${x.weak} weak spot${x.weak === 1 ? '' : 's'} from feedback` : ''].filter(Boolean).join(' · '), depth: DEPTH })) }));
   put('settings', CID, { strictness: 'standard' });
   for (const s of sources) {
     const chunks = L.chunkText(s.text);
@@ -139,7 +139,9 @@ if (step === 'assemble') {
     const doc = { courseId: CID, unitId: uid, n: x.n, title: x.les.title, depth: x.les.depth, checked, fixed, createdAt: NOW, ideas: [] };
     ideas.forEach((idea0, k) => {
       const idea = L.clone(idea0), ideaId = lid + 'i' + k, cards = idea.cards || []; delete idea.cards;
-      idea.id = ideaId; idea.flags = idea.flags || []; doc.ideas.push(idea);
+      idea.id = ideaId; idea.flags = idea.flags || [];
+      if (idea.cloze) { if (clozes.some(q => L.nearDuplicate(q, idea.cloze.sentence))) { idea.cloze = null; dupCloze++; } else clozes.push(idea.cloze.sentence); }
+      doc.ideas.push(idea);
       const common = { courseId: CID, unitId: uid, lessonId: lid, ideaId, ideaTitle: idea.title, yield: idea.yield, createdAt: NOW + k }, tbId = ideaId + 't', fsrs = () => (early ? Object.assign(L.newFsrs(), { due: T }) : L.newFsrs());
       put('cards', tbId, L.newCard(Object.assign({}, common, { type: 'teachback', prompt: idea.title, answer: idea.mechanism.text + (idea.why ? '\n\n' + idea.why.text : ''), rubric: idea.keyPoints, prompts: idea.prompts, hints: idea.hints, cloze: idea.cloze, quote: idea.quote, origin: idea.mechanism.origin, tbId, fsrs: fsrs() })));
       let j = 0;
@@ -159,8 +161,8 @@ if (step === 'assemble') {
   let fbCards = 0;
   plan.weak.forEach((w, i) => {
     let cardId = null;
-    if (w.card && !seen.some(q => L.nearDuplicate(q, w.card.prompt))) { cardId = 'kfb' + (i + 1); seen.push(w.card.prompt); fbCards++; put('cards', cardId, L.newCard(Object.assign({}, w.card, { courseId: CID, unitId: w.unitId, ideaTitle: w.idea, quote: w.quote, origin: 'source', fromFeedback: true, createdAt: NOW + i, fsrs: Object.assign(L.newFsrs(), { due: T }) }))); }
-    put('mistakes', 'mfb' + (i + 1), { cardId, courseId: CID, unitId: w.unitId, ideaId: null, ideaTitle: w.idea, prompt: w.topic ? 'Topic: ' + w.topic : (w.card ? w.card.prompt : (w.idea || 'Feedback from your tutor')), given: '', why: w.gap + (w.quote ? ' Feedback said: "' + w.quote + '"' : ''), kind: 'feedback', guess: false, day: T, at: NOW + i });
+    if (w.card && !seen.some(q => L.nearDuplicate(q, w.card.prompt))) { cardId = 'kfb' + (i + 1); seen.push(w.card.prompt); fbCards++; put('cards', cardId, L.newCard(Object.assign({}, w.card, { courseId: CID, unitId: w.unitId, ideaTitle: w.idea, quote: w.quote, origin: w.card.origin === 'source' && w.quote ? 'source' : 'added', fromFeedback: true, createdAt: NOW + i, fsrs: Object.assign(L.newFsrs(), { due: T }) }))); }
+    put('mistakes', 'mfb' + (i + 1), { cardId, courseId: CID, unitId: w.unitId, lessonId: w.lessonId || null, ideaId: null, ideaTitle: w.idea, prompt: w.topic ? 'Topic: ' + w.topic : (w.card ? w.card.prompt : (w.idea || 'Feedback from your tutor')), given: '', why: w.gap + (w.quote ? ' Feedback said: "' + w.quote + '"' : ''), kind: 'feedback', guess: false, day: T, at: NOW + i });
   });
   let count = 0, big = [];
   for (const [col, docs] of Object.entries(db)) for (const [id, d] of Object.entries(docs)) { wr(`db/${col}/${id}.json`, JSON.stringify(d)); count++; const n = JSON.stringify(d).length; if (n > 240000) big.push(`${col}/${id} ${n}`); }
@@ -169,10 +171,10 @@ if (step === 'assemble') {
   const md = ['# Generated course: ' + COURSE.title, '', '## ABOUT THE LEARNER (background only, shown under "About you", never taught or quizzed)', '', plan.profile || 'none', '', '## COURSE GLOSSARY (from the plan; every topic was told to use these definitions)', '', ...plan.glossary.map(g => `- ${g.term}: ${g.def}${g.fromSource ? '' : ' [added]'}`), ''];
   for (const u of plan.units) {
     md.push('## MODULE: ' + u.title + (u.kind === 'gaps' ? '  [from the assessment: taught from Claude\'s own knowledge, labelled added]' : ''), '');
-    if (u.tasks.length) { md.push('EXERCISE CHECKLIST (things to do, shown as tick boxes, never turned into review cards):'); for (const t of u.tasks) md.push(`- ${t.title}: ${t.criteria.map(c => c.text).join(' | ')}`); md.push(''); }
+    if (u.tasks.length) { md.push('EXERCISE CHECKLIST (things to do, shown as tick boxes, never turned into review cards):'); for (const t of u.tasks) md.push(`- ${t.title}${(t.steps || []).length ? ' STEPS: ' + t.steps.join(' > ') : ''} DONE WHEN: ${t.criteria.map(c => c.text).join(' | ')}`); md.push(''); }
     u.lessons.forEach((les, k) => {
       const x = lessons.find(z => z.lid === `${u.id}L${k}`);
-      md.push(`### TOPIC ${u.id}L${k}: ${les.title}  [depth: ${les.depth}; from ${les.sid}]`, les.gaps.length ? 'AIMED AT THESE WEAK SPOTS: ' + les.gaps.join(' || ') : '', '');
+      md.push(`### TOPIC ${u.id}L${k}: ${les.title}  [depth: ${les.depth}; from ${les.sid}]`, les.known ? 'TUTOR RATED THE LEARNER STRONG HERE (kept to one idea, no cards)' : null, les.gaps.length ? 'AIMED AT THESE WEAK SPOTS: ' + les.gaps.join(' || ') : null, '');
       if (!x || !x.ideas.length) { md.push('_NOT BUILT_', ''); return; }
       const doc = db.lessons[x.lid];
       if (doc.fixed) md.push(`(self-check corrected ${doc.fixed} thing(s) in this topic before it was shown)`, '');
@@ -193,7 +195,7 @@ if (step === 'assemble') {
   md.push('', '## PER-SOURCE PLAN LOG', ''); for (const x of plan.log) md.push(`- ${x.sid} "${x.title}": found ${x.found.join(', ') || 'nothing'}; ${x.lessons} topics and ${x.tasks} exercise checklists into ${x.units.join(', ') || 'no module'}; ${x.weak} weak spots. Note: ${x.note || 'none'}`);
   wr('course.md', md.filter(x => x != null).join('\n')); wr('fixlog.txt', fixLog.join('\n'));
   const words = s => String(s || '').split(/\s+/).filter(Boolean).length, ideasAll = Object.values(db.lessons || {}).flatMap(l => l.ideas);
-  const report = { docs: count, tooBig: big, byCollection: Object.fromEntries(Object.entries(db).map(([c, d]) => [c, Object.keys(d).length])), validation: stats, planStats: plan.stats, selfCheck: { fixesReturned: nFixesRaw, applied: nFixed, stillOpen: nFlags }, lessonsUnchecked: unchecked, duplicateCardsDropped: dupCards, feedbackCards: fbCards,
+  const report = { docs: count, tooBig: big, byCollection: Object.fromEntries(Object.entries(db).map(([c, d]) => [c, Object.keys(d).length])), validation: stats, planStats: plan.stats, selfCheck: { fixesReturned: nFixesRaw, applied: nFixed, stillOpen: nFlags }, lessonsUnchecked: unchecked, duplicateCardsDropped: dupCards, duplicateClozeDropped: dupCloze, feedbackCards: fbCards,
     reviewLoad: (() => { const cs = Object.values(db.cards || {}).filter(c => c.status === 'active'), units = cs.reduce((a, c) => a + (c.type === 'teachback' || c.type === 'apply' ? 3 : 1), 0); return { activeCards: cs.length, units, daysAtCap20: Math.ceil(units / 20) }; })(),
     ideaWords: { avg: Math.round(ideasAll.reduce((a, i) => a + words(i.mechanism.text) + words(i.analogy && i.analogy.text) + words(i.why && i.why.text) + (i.example ? i.example.steps.reduce((b, s) => b + words(s.text), 0) : 0), 0) / Math.max(1, ideasAll.length)), mechanismAvg: Math.round(ideasAll.reduce((a, i) => a + words(i.mechanism.text), 0) / Math.max(1, ideasAll.length)) },
     shape: { ideas: ideasAll.length, withAnalogy: ideasAll.filter(i => i.analogy).length, withExample: ideasAll.filter(i => i.example).length, withVisual: ideasAll.filter(i => i.visual).length, withQuote: ideasAll.filter(i => i.quote).length, withCloze: ideasAll.filter(i => i.cloze).length, sourceMechanism: ideasAll.filter(i => i.mechanism.origin === 'source').length, allFourPrompts: ideasAll.filter(i => L.STYLES.every(s => i.prompts[s])).length, twoHints: ideasAll.filter(i => i.hints.length === 2).length },

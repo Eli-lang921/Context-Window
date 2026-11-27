@@ -31,12 +31,19 @@ VIEWS.notebook = () => {
   const f = ui('nbCourse', 'all'), all = list('mistakes').sort((a, b) => b.at - a.at);
   const shown = all.filter(m => f === 'all' || m.courseId === f), cs = courseList().filter(c => all.some(m => m.courseId === c.id));
   const reviewable = [...new Set(shown.map(m => m.cardId).filter(id => id && S.cards[id] && S.cards[id].status === 'active'))];
-  return `<div class="stack-lg"><h1>Progress</h1>${progressTabs('notebook')}<div class="stack"><h2>Mistake notebook</h2><p class="muted">Every miss, with why. Read it through before a test, or review the cards behind it.</p></div>
+  const KIND = { review: 'Review', lesson: 'Lesson', test: 'Test', game: 'Game', cram: 'Cram', feedback: 'Tutor feedback' };
+  const entry = m => { const fb = m.kind === 'feedback', lid = m.lessonId && S.lessons[m.lessonId] ? m.lessonId : null;
+    return `<div class="panel stack tight"><div class="row between"><div class="row">${chip(KIND[m.kind] || 'Review')}${m.guess ? chip('Guess', 'due') : ''}${m.ideaTitle ? chip(m.ideaTitle) : ''}</div><span class="small muted">${esc(m.day || '')}</span></div>
+    ${fb && m.lessonId ? '' : `<div class="qprompt small">${inline(m.prompt)}</div>`}${m.given ? `<div class="small"><b>You said:</b> ${esc(cut(m.given, 300))}</div>` : ''}${m.why ? `<div class="small"><b>${fb ? 'Your tutor said:' : 'Why it was a miss:'}</b> ${inline(m.why)}</div>` : ''}
+    <div class="row">${lid ? `<a class="btn sm" href="#learn-${esc(lid)}">Open the topic that teaches this</a>` : fb && m.lessonId ? `<span class="small muted">${inline(m.prompt)} (not built yet)</span>` : ''}<button class="linkbtn small" data-act="nb-drop" data-id="${m.id}">Remove</button></div></div>`; };
+  /* Grouped by module, newest first inside each group. */
+  const groups = []; for (const m of shown.slice(0, 120)) { const key = m.unitId && S.units[m.unitId] ? m.unitId : ''; let g = groups.find(x => x.key === key); if (!g) { g = { key, title: key ? S.units[key].title : 'Not tied to a module', n: key ? num(S.units[key].n) : 999, items: [] }; groups.push(g); } g.items.push(m); }
+  groups.sort((x, y) => x.n - y.n);
+  return `<div class="stack-lg"><h1>Progress</h1>${progressTabs('notebook')}<div class="stack"><h2>Mistake notebook</h2><p class="muted">Every miss and every weak spot your tutor named, grouped by module. Read it through before a test, or review the cards behind it.</p></div>
   ${cs.length > 1 ? seg('nbCourse', [['all', 'All courses']].concat(cs.map(c => [c.id, c.title])), f) : ''}
-  ${shown.length ? `<div class="row">${reviewable.length ? `<button class="btn primary" data-act="nb-review">Review these ${plural(reviewable.length, 'card')}</button>` : ''}<button class="btn ghost" data-act="nb-clear">Clear this list</button></div>
-  <div class="stack">${shown.slice(0, 120).map(m => `<div class="panel stack tight"><div class="row between"><div class="row">${chip({ review: 'Review', lesson: 'Lesson', test: 'Test', game: 'Game', cram: 'Cram', feedback: 'Tutor feedback' }[m.kind] || 'Review')}${m.guess ? chip('Guess', 'due') : ''}${m.ideaTitle ? chip(m.ideaTitle) : ''}</div><span class="small muted">${esc(m.day || '')}</span></div>
-    <div class="qprompt small">${inline(m.prompt)}</div>${m.given ? `<div class="small"><b>You said:</b> ${esc(cut(m.given, 300))}</div>` : ''}${m.why ? `<div class="small"><b>Why it was a miss:</b> ${inline(m.why)}</div>` : ''}
-    <div><button class="linkbtn small" data-act="nb-drop" data-id="${m.id}">Remove</button></div></div>`).join('')}</div>` : emptyBox('No misses logged. They appear here from review, lessons, tests, games and tutor feedback you paste.')}</div>`;
+  ${shown.length ? `${reviewable.length ? `<div class="row"><button class="btn primary" data-act="nb-review">Review these ${plural(reviewable.length, 'card')}</button></div>` : ''}
+  <div class="stack">${groups.map((g, gi) => { const open = ui('nb-' + g.key, groups.length === 1 || gi === 0); return `<div class="stack tight"><button type="button" class="btn ghost nbgroup" data-act="toggle" data-key="nb-${esc(g.key)}" aria-expanded="${!!open}"><b>${esc(g.title)}</b><span class="muted">${plural(g.items.length, 'entry', 'entries')} · ${open ? 'Hide' : 'Show'}</span></button>${open ? g.items.map(entry).join('') : ''}</div>`; }).join('')}</div>
+  <div><button class="linkbtn small" data-act="nb-clear">Clear this list</button></div>` : emptyBox('No misses logged. They appear here from review, lessons, tests, games and tutor feedback you paste.')}</div>`;
 };
 Object.assign(ACT, {
   'nb-review': () => { const f = UI.nbCourse; const ids = [...new Set(list('mistakes').filter(m => f === 'all' || m.courseId === f).sort((a, b) => b.at - a.at).map(m => m.cardId).filter(id => id && S.cards[id] && S.cards[id].status === 'active'))].slice(0, 30); if (ids.length) startSession({ kind: 'notebook', title: 'Mistake review', ids, mode: 'light', bucket: 'none', back: 'notebook' }); },
@@ -181,7 +188,7 @@ VIEWS.home = () => {
   <div class="grid-2"><div class="stack">
     <div class="panel stack due-panel"><div class="row between"><div><span class="eyebrow">Daily review</span><div class="stat-big num">${q.restDay ? 'Rest day' : q.unitsPlanned}<small>${q.restDay ? '' : ' units · ' + plural(q.items.length, 'item')}</small></div></div>
       ${q.items.length ? `<button class="btn primary" data-act="review-start">Start review</button>` : d.done ? chip('Done for today', 'good') : q.restDay ? `<a class="btn" href="#review">Options</a>` : chip('Nothing due', 'good')}</div>
-      ${meter(Math.min(d.units, L.CAP), q.unitsPlanned)}<div class="small muted">${d.units} of ${L.CAP} units used today.${q.backlog && !q.restDay ? ` ${plural(q.backlog, 'more item')} wait for tomorrow.` : ''}${q.restDay ? ' Due items roll to tomorrow and your streak is safe.' : ''}</div>
+      ${meter(Math.min(d.units, L.CAP), q.unitsPlanned)}<div class="small muted">${d.units} of ${L.CAP} review units done today${q.unitsPlanned ? `, ${q.unitsPlanned} waiting` : ''}.${q.backlog && !q.restDay ? ` ${plural(q.backlog, 'more item')} wait for tomorrow.` : ''}${q.restDay ? ' Due items roll to tomorrow and your streak is safe.' : ''}</div>
       ${!q.items.length && !q.restDay && extra.items.length ? `<div class="row"><button class="btn sm" data-act="review-extra">Do ${Math.min(L.EXTRA, extra.unitsPlanned)} more units</button><span class="small muted">Optional. Doesn't affect your streak.</span></div>` : ''}</div>
     <div class="panel row between"><div class="grow"><b>Learned something new?</b><div class="small muted">Paste it and Claude files it into the right course.</div></div><a class="btn" href="#add">${icon('plus')}<span>Add learning</span></a></div>
     <div class="stack tight"><h2>Keep learning</h2>${active.length ? `<div class="panel list">${active.map(c => { const nx = nextLesson(c.id), p = coursePace(c); return `<div class="row between"><div class="grow"><a class="title-link" href="#course-${c.id}"><b>${esc(c.title)}</b></a>
@@ -189,7 +196,7 @@ VIEWS.home = () => {
         ${nx && !nx.build ? `<a class="btn sm primary" href="#learn-${nx.lid}">Continue</a>` : `<a class="btn sm" href="#course-${c.id}">Open</a>`}</div>`; }).join('')}</div>` : '<p class="small muted">No active course yet.</p>'}
       ${setup.length ? `<div class="panel list">${setup.map(c => `<div class="row between"><span class="grow">${esc(c.title)}</span><a class="btn sm" href="#course-${c.id}">Finish setup</a></div>`).join('')}</div>` : ''}</div>
   </div><div class="stack">
-    ${feedbackRow('')}
+    ${feedbackRow('', true)}
     <div class="panel stack"><h3>Weak spots</h3>${weak.length ? `<div class="list">${weak.map(i => `<div><b>${esc(i.title || 'Idea')}</b><div class="small muted">${esc((S.units[i.unitId] || {}).title || '')}</div></div>`).join('')}</div><a class="small" href="#notebook">Open the mistake notebook</a>` : '<p class="small muted">Ideas you keep missing show here.</p>'}</div>
     ${inbox ? `<div class="panel row between"><div class="grow"><b>${plural(inbox, 'item')} from chat</b><div class="small muted">Waiting under Add learning, "From chat".</div></div><a class="btn sm" href="#add">Open</a></div>` : ''}
     ${open ? `<div class="panel row between"><div class="grow"><b>${plural(open, 'flagged item')}</b><div class="small muted">Waiting for your look.</div></div><a class="btn sm" href="#reports">Reports</a></div>` : ''}
