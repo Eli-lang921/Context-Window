@@ -141,3 +141,15 @@ Eli's answers in a second interview. Where this section conflicts with sections 
 - **Navigation**: three tabs (Today, Courses, Progress). Settings is a gear icon. The course page is one page: Continue, Add learning, Tutor, Mind map, then the modules; practice tests, games, cram, placement, sources, module editing and options sit in a "More tools" menu. Mistake notebook, reports and badges are tabs under Progress. On an item, Explain stays visible; Ask, Mark mastered and Report fold under "More".
 - **Look**: calmer and more minimal (mostly neutral, one accent, flat cards, quieter type). This replaces "playful, StudyFetch-like" in section 8. Badges and XP stay, toned down.
 - **Model for building (added 2026-11-27)**: Eli chooses which Claude builds a course: Fast, Balanced (default), Most capable, Fable 5.2, or any model id he types. The choice sits in Settings and on the Add learning screen. It applies to filing plans, syllabus, lessons, the self-check and study guides; grading, hints and the tutor keep the standard model. A named model that cannot answer falls back to a tier without an error, and "Test this choice" shows which model actually answered.
+
+## 13. Round 3 fixes (2026-11-27, from grading a real AI Cred course build)
+
+Three independent graders scored the first generated AI Cred course 64 (fidelity), 46 (teaching) and 55 (product). These rules fix the causes:
+
+- **Three kinds of pasted content**: concepts become topics to learn; exercise instructions and done-when criteria become a per-module **exercise checklist** (tick boxes, never review cards); facts about the learner (scores, projects, strengths) become an **About you** note on the course, used only to make examples personal.
+- **One idea, taught once**: every lesson build is told what the rest of the course teaches and how the course glossary defines its terms.
+- **Weak spots**: filed under the module they belong to. If a planned topic teaches the gap, that topic is aimed at it and no separate card is made; otherwise one review card that makes the learner do the skill. Praise and small polish on strong answers are not weak spots. Limit 24 per paste.
+- **Gaps the material names but does not teach** may go in one module ("From your assessment"), taught from Claude's own knowledge and labelled as added.
+- **Self-check repairs**: the second pass returns fixes (relabel as added, replace text, drop a card), which are applied before the learner sees the topic. Only what it cannot fix stays as an open flag in plain language.
+- **Lesson rules**: hard word limit per idea; examples use only facts the material states about the learner (invented figures only inside "Suppose"); key points are claims, not logistics; hints never state a key point; at most one extra card per idea; near-duplicate cards are dropped across the course.
+- **Screens**: the course page shows the next topic, the exercise checklist, a "From your tutor's feedback" row and About you; the mind map is a module > topic > idea outline; on phones the Tutor sits in the tab bar.
