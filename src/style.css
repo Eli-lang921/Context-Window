@@ -321,4 +321,4 @@ button.mnode.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
 .tasks-toggle { display: inline-flex; gap: 8px; align-items: center; align-self: flex-start; white-space: normal; text-align: left; }
 .nbgroup { display: flex; justify-content: space-between; gap: 12px; width: 100%; text-align: left; white-space: normal; border: 1px solid var(--line); }
 @media (min-width: 761px) { main { padding-bottom: 120px; } }
-@media (max-width: 760px) { .tabs, .ptabs { flex-wrap: wrap; overflow: visible; } }
+@media (max-width: 760px) { .seg.scroll { flex-wrap: wrap; overflow: visible; } .nbgroup { flex-direction: column; gap: 2px; } }

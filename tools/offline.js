@@ -53,7 +53,7 @@ function loadPlan() {
       if (!uid) { uid = 'uaic' + (units.length + 1); units.push({ id: uid, title: p.unit, kind: p.kind, lessons: [], tasks: [] }); }
       const u = units.find(x => x.id === uid); byPlacement.set(p, u);
       for (const l of p.lessons) { const les = Object.assign({ title: l.title, ideas: l.ideas, segs: l.segs.filter(r => refs.has(r)), depth: DEPTH, sid: s.sid, addedDay: T, gaps: [] }, l.known ? { known: true } : {}); l.out = les; l.lid = u.id + 'L' + u.lessons.length; u.lessons.push(les); }
-      u.tasks.push(...p.tasks.map(x => ({ title: x.title, steps: x.steps || [], criteria: x.criteria.map(text => ({ text, done: false })) })));
+      u.tasks.push(...p.tasks.map(x => ({ title: x.title, steps: x.steps || [], criteria: x.criteria.map(text => ({ text, done: !!p.done && !/^from feedback/i.test(x.title) })) }))); if (p.done) u.doneInSource = true;
       if (!touched.includes(u.title)) touched.push(u.title);
       stats.placements++; stats.lessons += p.lessons.length; stats.tasks += p.tasks.length;
     }
@@ -170,11 +170,11 @@ if (step === 'assemble') {
   /* A readable copy of the whole generated course for graders. */
   const md = ['# Generated course: ' + COURSE.title, '', '## ABOUT THE LEARNER (background only, shown under "About you", never taught or quizzed)', '', plan.profile || 'none', '', '## COURSE GLOSSARY (from the plan; every topic was told to use these definitions)', '', ...plan.glossary.map(g => `- ${g.term}: ${g.def}${g.fromSource ? '' : ' [added]'}`), ''];
   for (const u of plan.units) {
-    md.push('## MODULE: ' + u.title + (u.kind === 'gaps' ? '  [from the assessment: taught from Claude\'s own knowledge, labelled added]' : ''), '');
-    if (u.tasks.length) { md.push('EXERCISE CHECKLIST (things to do, shown as tick boxes, never turned into review cards):'); for (const t of u.tasks) md.push(`- ${t.title}${(t.steps || []).length ? ' STEPS: ' + t.steps.join(' > ') : ''} DONE WHEN: ${t.criteria.map(c => c.text).join(' | ')}`); md.push(''); }
+    md.push('## MODULE: ' + u.title + (u.doneInSource ? '  [the paste says this module is done: its checklist starts ticked]' : '') + (u.kind === 'gaps' ? '  [from the assessment: taught from Claude\'s own knowledge, labelled added]' : ''), '');
+    if (u.tasks.length) { md.push('EXERCISE CHECKLIST (things to do, shown as tick boxes, never turned into review cards):'); for (const t of u.tasks) md.push(`- ${t.title}${(t.steps || []).length ? ' STEPS (behind a "How to do it" toggle): ' + t.steps.join(' > ') : ''} DONE WHEN: ${t.criteria.map(c => (c.done ? '[x] ' : '[ ] ') + c.text).join(' | ')}`); md.push(''); }
     u.lessons.forEach((les, k) => {
       const x = lessons.find(z => z.lid === `${u.id}L${k}`);
-      md.push(`### TOPIC ${u.id}L${k}: ${les.title}  [depth: ${les.depth}; from ${les.sid}]`, les.known ? 'TUTOR RATED THE LEARNER STRONG HERE (kept to one idea, no cards)' : null, les.gaps.length ? 'AIMED AT THESE WEAK SPOTS: ' + les.gaps.join(' || ') : null, '');
+      md.push(`### TOPIC ${u.id}L${k}: ${les.title}  [depth: ${les.depth}; from ${les.sid}]`, les.known ? 'TUTOR RATED THE LEARNER STRONG HERE (no cards; Continue saves this topic for last)' : null, les.gaps.length ? 'AIMED AT THESE WEAK SPOTS: ' + les.gaps.join(' || ') : null, '');
       if (!x || !x.ideas.length) { md.push('_NOT BUILT_', ''); return; }
       const doc = db.lessons[x.lid];
       if (doc.fixed) md.push(`(self-check corrected ${doc.fixed} thing(s) in this topic before it was shown)`, '');

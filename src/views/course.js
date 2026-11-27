@@ -20,11 +20,15 @@ function lessonDone(lid) {
   return cs.length > 0 && cs.every(c => c.firstScore != null);
 }
 function nextLesson(cid) {
+  /* Topics the tutor already rated strong wait until everything else is done. */
+  return nextLessonWhere(cid, l => !l.known) || nextLessonWhere(cid, () => true);
+}
+function nextLessonWhere(cid, want) {
   for (const u of unitsOf(cid)) {
     if (u.passedAt && u.reviewOnly) continue;
     const ls = u.lessons || [];
     if (!ls.length) { if ((u.tasks || []).length) continue; return { unit: u, build: true }; }
-    for (let n = 0; n < ls.length; n++) { if (!ls[n].built) return { unit: u, build: true }; if (!lessonDone(u.id + 'L' + n)) return { unit: u, lid: u.id + 'L' + n }; }
+    for (let n = 0; n < ls.length; n++) { if (!want(ls[n])) continue; if (!ls[n].built) return { unit: u, build: true }; if (!lessonDone(u.id + 'L' + n)) return { unit: u, lid: u.id + 'L' + n }; }
   }
   return null;
 }
@@ -374,14 +378,14 @@ async function buildUnit(uid) {
 }
 function tasksHtml(u, openByDefault) {
   const ts = L.arr(u.tasks, 12); if (!ts.length) return '';
-  const all = ts.flatMap(x => x.criteria || []), done = all.filter(x => x.done).length, open = ui('tasks-' + u.id, !!openByDefault);
+  const all = ts.flatMap(x => x.criteria || []), done = all.filter(x => x.done).length, open = ui('tasks-' + u.id, !!openByDefault && done < all.length);
   return `<div class="tasks stack tight"><button type="button" class="btn sm ghost tasks-toggle" data-act="toggle" data-key="tasks-${u.id}" aria-expanded="${!!open}">${icon('check')}<span>${plural(ts.length, 'exercise')} to do · ${done} of ${all.length} checks ticked</span><span class="muted">${open ? 'Hide' : 'Show'}</span></button>
-  ${open ? ts.map((x, ti) => `<div class="stack tight"><b class="small">${esc(x.title)}</b>${(x.steps || []).length ? `<ol class="tightlist small muted">${x.steps.map(st => `<li>${esc(st)}</li>`).join('')}</ol><span class="small muted">Done when:</span>` : ''}${(x.criteria || []).map((k, ci) => `<label class="tick small"><input type="checkbox" id="tk-${u.id}-${ti}-${ci}" data-act-change="task-tick" data-uid="${u.id}" data-t="${ti}" data-c="${ci}" ${k.done ? 'checked' : ''}><span>${esc(k.text)}</span></label>`).join('')}</div>`).join('') : ''}</div>`;
+  ${open ? ts.map((x, ti) => `<div class="stack tight"><b class="small">${esc(x.title)}</b>${(x.steps || []).length ? `<button type="button" class="linkbtn small" data-act="toggle" data-key="steps-${u.id}-${ti}">${ui('steps-' + u.id + '-' + ti, false) ? 'Hide the steps' : 'How to do it (' + plural(x.steps.length, 'step') + ')'}</button>${ui('steps-' + u.id + '-' + ti, false) ? `<ol class="tightlist small muted">${x.steps.map(st => `<li>${esc(st)}</li>`).join('')}</ol>` : ''}` : ''}${(x.criteria || []).map((k, ci) => `<label class="tick small"><input type="checkbox" id="tk-${u.id}-${ti}-${ci}" data-act-change="task-tick" data-uid="${u.id}" data-t="${ti}" data-c="${ci}" ${k.done ? 'checked' : ''}><span>${esc(k.text)}</span></label>`).join('')}</div>`).join('') : ''}</div>`;
 }
 function feedbackRow(cid, noReview) {
   const notes = list('mistakes').filter(m => m.kind === 'feedback' && (!cid || m.courseId === cid)).length; if (!notes) return '';
   const cards = list('cards').filter(k => k.fromFeedback && k.status === 'active' && (!cid || k.courseId === cid)).length;
-  return `<div class="note fbrow"><span><b>From your tutor's feedback: ${plural(notes, 'weak spot')}.</b> ${cards ? plural(cards, 'review card') + ' aimed at them; the rest steer the topics that teach them.' : 'The topics that teach them are aimed at these gaps.'}</span><span class="row">${cards && !noReview ? `<button class="btn sm" data-act="fb-review" data-cid="${esc(cid || '')}">Review these</button>` : ''}<a class="btn sm ghost" href="#notebook">See them</a></span></div>`;
+  return `<div class="note fbrow"><span><b>From your tutor's feedback: ${plural(notes, 'weak spot')}.</b> ${cards ? plural(cards, 'review card') + ' for the ones no topic teaches; the rest are taught in the topics marked with a weak-spot chip.' : 'They are taught in the topics marked with a weak-spot chip.'}</span><span class="row">${cards && !noReview ? `<button class="btn sm" data-act="fb-review" data-cid="${esc(cid || '')}">Review these</button>` : ''}<a class="btn sm ghost" href="#notebook">See them</a></span></div>`;
 }
 
 /* ---------- Course page ---------- */
@@ -426,10 +430,10 @@ VIEWS.course = cid => {
   ${p.mode === 'deadline' && p.status !== 'done' && p.status !== 'past' && us.length ? `<div class="note"><b>Today's plan:</b> ${plural(p.lessonsPerDay, 'lesson')}, about ${p.minutesNeeded} minutes with review. You set aside ${num(c.minutesPerDay)} minutes a day.${p.status === 'behind' ? ' That is more than your daily time, so the target date is at risk: add minutes, move the date, or cut modules.' : ''}</div>` : ''}
   ${p.cramSuggested && !c.cram ? `<div class="note row between"><span><b>${p.daysLeft} days to your target date.</b> Cram mode reviews only the highest-yield ideas, on top of daily review.</span><button class="btn sm" data-act="cram-on" data-cid="${cid}">Turn on cram mode</button></div>` : ''}
   ${us.length ? `<div class="stack"><h2>Modules</h2>${us.map((u, i) => { const up = unitProgress(u), bkey = 'build-' + u.id; const gate = i > 0 && !us[i - 1].passedAt && !u.passedAt && !up.built;
-    return `<div class="panel stack tight unit"><div class="row between"><h3 class="grow">${esc(u.title)}</h3><div class="row">${u.reviewOnly ? chip('Review only', 'accent') : ''}${u.passedAt ? chip('Passed' + (u.passScore ? ' · ' + num(u.passScore) : ''), 'good') : up.built && up.total && up.done === up.total && !up.pending ? chip('Below pass mark · ' + up.avg, 'due') : ''}${u.kind === 'gaps' ? chip('Written by Claude, not in your course', 'added') : u.origin === 'added' ? chip('Added by Claude', 'added') : ''}${(u.lessons || []).some(l => (l.gaps || []).length) ? chip(plural((u.lessons || []).reduce((k, l) => k + (l.gaps || []).length, 0), 'weak spot') + ' aimed here', 'due') : ''}</div></div>
+    return `<div class="panel stack tight unit"><div class="row between"><h3 class="grow">${esc(u.title)}</h3><div class="row">${u.reviewOnly ? chip('Review only', 'accent') : ''}${u.passedAt ? chip('Passed' + (u.passScore ? ' · ' + num(u.passScore) : ''), 'good') : up.built && up.total && up.done === up.total && !up.pending ? chip('Below pass mark · ' + up.avg, 'due') : ''}${u.kind === 'gaps' ? chip('Written by Claude, not in your course', 'added') : u.origin === 'added' ? chip('Added by Claude', 'added') : ''}</div></div>
       ${u.summary ? `<p class="small muted">${esc(u.summary)}</p>` : ''}${gate ? `<div class="small muted">Recommended after you pass the module before it. You can still start it now.</div>` : ''}
       ${up.total ? bar(100 * up.done / up.total) : ''}
-      ${(u.lessons || []).length ? `<ol class="lessons small">${u.lessons.map((l, n) => { const lid = u.id + 'L' + n; return `<li>${l.built ? `<a href="#learn-${lid}">${esc(l.title)}</a>` : `<span class="muted">${esc(l.title)}</span>`} ${!l.built ? chip('Not built yet') : l.depth === 'review' ? chip('Review cards only') : lessonDone(lid) ? chip('Done', 'good') : nx && nx.lid === lid ? chip('Next', 'accent') : ''}${l.known && !lessonDone(lid) ? ' ' + chip('Your tutor rated you strong here') : ''}</li>`; }).join('')}</ol>` : '<span class="small muted">Topics are planned when you build this module.</span>'}
+      ${(u.lessons || []).length ? `<ol class="lessons small">${u.lessons.map((l, n) => { const lid = u.id + 'L' + n; return `<li>${l.built ? `<a href="#learn-${lid}">${esc(l.title)}</a>` : `<span class="muted">${esc(l.title)}</span>`} ${!l.built ? chip('Not built yet') : l.depth === 'review' ? chip('Review cards only') : lessonDone(lid) ? chip('Done', 'good') : nx && nx.lid === lid ? chip('Next', 'accent') : ''}${(l.gaps || []).length ? ' ' + chip(plural(l.gaps.length, 'weak spot'), 'due') : ''}${l.known && !lessonDone(lid) ? ' ' + chip('Rated strong by your tutor · saved for last') : ''}</li>`; }).join('')}</ol>` : '<span class="small muted">Topics are planned when you build this module.</span>'}
       ${tasksHtml(u, nx ? nx.unit.id === u.id : false)}
       <div class="row">${up.pending || (!up.lessons && !(u.tasks || []).length) ? (aiOn() ? `<button class="btn sm ${isBusy(bkey) ? '' : 'primary'}" data-act="unit-build" data-uid="${u.id}" ${isBusy(bkey) ? 'disabled' : ''}>${up.built ? `Build ${plural(up.pending, 'new topic')}` : 'Build this module'}</button>` : needAI) : ''}${up.built ? `<a class="btn sm ghost" href="#guide-${u.id}">Study guide and audio recap</a>` : ''}</div>${busyHtml(bkey)}</div>`; }).join('')}</div>`
     : `<div class="empty stack"><b>This course is empty.</b><span>Paste what you have learned and Claude will file it into modules and topics, then teach and review it with you.</span><div><a class="btn primary" href="#add-${cid}">Add your first learning</a></div></div>`}

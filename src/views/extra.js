@@ -11,7 +11,7 @@ VIEWS.map = cid => {
     const tb = tbCards(u.id), strong = tb.filter(k => ['strong', 'mastered'].includes(L.ideaLevel(cardsOf('ideaId', k.ideaId)))).length;
     const topics = (u.lessons || []).map((l, n) => { const lid = u.id + 'L' + n, mine = tb.filter(k => k.lessonId === lid).sort((x, y) => (x.createdAt || 0) - (y.createdAt || 0));
       return `<div class="mtopic"><span class="small mtitle">${l.built ? `<a href="#learn-${lid}">${esc(l.title)}</a>` : esc(l.title) + ' ' + chip('Not built yet')}</span><div class="mideas">${mine.length ? mine.map(k => dot(L.ideaLevel(cardsOf('ideaId', k.ideaId)), k.ideaTitle, k.ideaId)).join('') : (l.ideas || []).map(x => dot('new', x, null)).join('')}</div></div>`; }).join('');
-    return `<div class="mmod"><button type="button" class="mnode unit ${sel === u.id ? 'sel' : ''}" data-act="map-sel" data-id="${esc(u.id)}"><b>${esc(u.title)}</b><span class="small muted">${tb.length ? `${strong} of ${plural(tb.length, 'idea')} strong` : 'Not built yet'}</span></button><div class="mtopics">${topics || '<span class="small muted">No topics yet.</span>'}</div></div>`;
+    return `<div class="mmod"><button type="button" class="mnode unit ${sel === u.id ? 'sel' : ''}" data-act="map-sel" data-id="${esc(u.id)}"><b>${esc(u.title)}</b><span class="small muted">${tb.length ? `${strong} of ${plural(tb.length, 'idea')} strong` : 'Not built yet'}${u.kind === 'gaps' ? ' · written by Claude, not in your course' : ''}</span></button><div class="mtopics">${topics || '<span class="small muted">No topics yet.</span>'}</div></div>`;
   }).join('');
   let panel = '';
   if (sel && S.units[sel]) { const u = S.units[sel], up = unitProgress(Object.assign({ id: sel }, u)); panel = `<div class="panel stack tight"><span class="eyebrow">Module</span><h3>${esc(u.title)}</h3><p class="small muted">${up.built ? `${up.done} of ${up.total} ideas explained back${up.avg != null ? ` · average ${up.avg}` : ''}` : 'Not built yet'}</p><div class="row">${up.built ? `<a class="btn sm primary" href="#learn-${sel}L0">Open first topic</a><a class="btn sm" href="#guide-${sel}">Study guide</a>` : `<a class="btn sm primary" href="#course-${cid}">Build it from the course page</a>`}</div></div>`; }
@@ -32,7 +32,7 @@ VIEWS.notebook = () => {
   const shown = all.filter(m => f === 'all' || m.courseId === f), cs = courseList().filter(c => all.some(m => m.courseId === c.id));
   const reviewable = [...new Set(shown.map(m => m.cardId).filter(id => id && S.cards[id] && S.cards[id].status === 'active'))];
   const KIND = { review: 'Review', lesson: 'Lesson', test: 'Test', game: 'Game', cram: 'Cram', feedback: 'Tutor feedback' };
-  const entry = m => { const fb = m.kind === 'feedback', lid = m.lessonId && S.lessons[m.lessonId] ? m.lessonId : null;
+  const entry = m => { const fb = m.kind === 'feedback', lu = m.lessonId ? S.units[m.lessonId.replace(/L\d+$/, '')] : null, lid = lu && ((lu.lessons || [])[+m.lessonId.split('L').pop()] || {}).built ? m.lessonId : null;
     return `<div class="panel stack tight"><div class="row between"><div class="row">${chip(KIND[m.kind] || 'Review')}${m.guess ? chip('Guess', 'due') : ''}${m.ideaTitle ? chip(m.ideaTitle) : ''}</div><span class="small muted">${esc(m.day || '')}</span></div>
     ${fb && m.lessonId ? '' : `<div class="qprompt small">${inline(m.prompt)}</div>`}${m.given ? `<div class="small"><b>You said:</b> ${esc(cut(m.given, 300))}</div>` : ''}${m.why ? `<div class="small"><b>${fb ? 'Your tutor said:' : 'Why it was a miss:'}</b> ${inline(m.why)}</div>` : ''}
     <div class="row">${lid ? `<a class="btn sm" href="#learn-${esc(lid)}">Open the topic that teaches this</a>` : fb && m.lessonId ? `<span class="small muted">${inline(m.prompt)} (not built yet)</span>` : ''}<button class="linkbtn small" data-act="nb-drop" data-id="${m.id}">Remove</button></div></div>`; };
@@ -197,7 +197,7 @@ VIEWS.home = () => {
       ${setup.length ? `<div class="panel list">${setup.map(c => `<div class="row between"><span class="grow">${esc(c.title)}</span><a class="btn sm" href="#course-${c.id}">Finish setup</a></div>`).join('')}</div>` : ''}</div>
   </div><div class="stack">
     ${feedbackRow('', true)}
-    <div class="panel stack"><h3>Weak spots</h3>${weak.length ? `<div class="list">${weak.map(i => `<div><b>${esc(i.title || 'Idea')}</b><div class="small muted">${esc((S.units[i.unitId] || {}).title || '')}</div></div>`).join('')}</div><a class="small" href="#notebook">Open the mistake notebook</a>` : '<p class="small muted">Ideas you keep missing show here.</p>'}</div>
+    ${weak.length ? `<div class="panel stack"><h3>Ideas you keep missing</h3><div class="list">${weak.map(i => `<div><b>${esc(i.title || 'Idea')}</b><div class="small muted">${esc((S.units[i.unitId] || {}).title || '')}</div></div>`).join('')}</div><a class="small" href="#notebook">Open the mistake notebook</a></div>` : ''}
     ${inbox ? `<div class="panel row between"><div class="grow"><b>${plural(inbox, 'item')} from chat</b><div class="small muted">Waiting under Add learning, "From chat".</div></div><a class="btn sm" href="#add">Open</a></div>` : ''}
     ${open ? `<div class="panel row between"><div class="grow"><b>${plural(open, 'flagged item')}</b><div class="small muted">Waiting for your look.</div></div><a class="btn sm" href="#reports">Reports</a></div>` : ''}
   </div></div></div>`;

@@ -29,7 +29,7 @@ function install(seedData) {
     await page.addInitScript(install, seed); await page.goto('file://' + file); await page.waitForFunction(() => typeof S !== 'undefined' && S.ready);
     const shot = async (hash, name, pre) => { await page.evaluate(x => { location.hash = x; }, hash); await page.waitForTimeout(250); if (pre) { await pre(); await page.waitForTimeout(200); } const wide = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1); if (wide) errors.push(`${w}: ${hash} scrolls sideways`); await page.screenshot({ path: path.join(out, `${name}-${w}.png`), fullPage: true }); };
     await shot('home', 'home'); await shot('course-' + cid, 'course');
-    for (const lid of lids.slice(0, 2)) await shot('learn-' + lid, 'lesson-' + lid);
+    for (const lid of [...new Set(lids.slice(0, 2).concat(lids.slice(-1)))]) await shot('learn-' + lid, 'lesson-' + lid);
     if (lids[0]) await shot('learn-' + lids[0], 'teachback', async () => { const b = page.locator('[data-act="learn-explain"]').first(); if (await b.count()) await b.click(); });
     await shot('review', 'review', async () => { const b = page.locator('[data-act="review-start"]').first(); if (await b.count()) await b.click(); });
     await shot('map-' + cid, 'map'); await shot('notebook', 'notebook'); await shot('reports', 'reports');
