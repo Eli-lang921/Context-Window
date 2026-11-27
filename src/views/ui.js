@@ -13,7 +13,7 @@ const ICONS = {
   flag: '<path d="M5 21V4h11l-2 4 2 4H5"/>', cap: '<path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c3 2 9 2 12 0v-5"/>',
   voice: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>', check: '<path d="M4 12l5 5L20 6"/>',
   star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.500l6.1-.9z"/>',
-  up: '<path d="M12 19V5M6 11l6-6 6 6"/>', down: '<path d="M12 5v14M6 13l6 6 6-6"/>', x: '<path d="M6 6l12 12M18 6L6 18"/>'
+  up: '<path d="M12 19V5M6 11l6-6 6 6"/>', down: '<path d="M12 5v14M6 13l6 6 6-6"/>', x: '<path d="M6 6l12 12M18 6L6 18"/>', plus: '<path d="M12 5v14M5 12h14"/>'
 };
 function icon(name) { return `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`; }
 
@@ -120,8 +120,8 @@ function confirmBox(title, body, yes, fn, danger = true) { CONFIRM.fn = fn; open
 
 /* ---------- Router ---------- */
 const VIEWS = {};
-const NAV = [['home', 'Home'], ['review', 'Review'], ['courses', 'Courses'], ['progress', 'Progress'], ['more', 'More']];
-const NAV_OF = { course: 'courses', newcourse: 'courses', syllabus: 'courses', learn: 'courses', map: 'courses', test: 'courses', cram: 'courses', games: 'courses', guide: 'courses', placement: 'courses', weekly: 'progress', stats: 'progress', badges: 'progress', progress: 'progress', notebook: 'more', reports: 'more', prefs: 'more', more: 'more' };
+const NAV = [['home', 'Today'], ['courses', 'Courses'], ['progress', 'Progress']];
+const NAV_OF = { course: 'courses', newcourse: 'courses', syllabus: 'courses', learn: 'courses', map: 'courses', test: 'courses', cram: 'courses', games: 'courses', guide: 'courses', placement: 'courses', add: 'courses', review: 'home', weekly: 'progress', stats: 'progress', badges: 'progress', progress: 'progress', notebook: 'progress', reports: 'progress', more: 'progress', prefs: '' };
 function parseHash() {
   const h = (location.hash || '').replace(/^#/, '');
   const m = /^([a-z]+)(?:-([A-Za-z0-9-]+))?$/.exec(h);
@@ -141,9 +141,10 @@ function renderNav() {
   const cur = NAV_OF[S.route] || S.route;
   const q = S.ready ? todayPlan() : { unitsPlanned: 0 };
   const flagged = S.ready ? openReportCount() : 0;
-  const item = ([k, l], withIcon) => `<a href="#${k}" ${cur === k ? 'aria-current="page"' : ''}>${withIcon ? icon(k) : ''}<span>${l}</span>${k === 'review' && q.unitsPlanned ? `<span class="count">${q.unitsPlanned}</span>` : ''}${k === 'more' && flagged ? `<span class="count">${flagged}</span>` : ''}</a>`;
+  const item = ([k, l], withIcon) => `<a href="#${k}" ${cur === k ? 'aria-current="page"' : ''}>${withIcon ? icon(k) : ''}<span>${l}</span>${k === 'home' && q.unitsPlanned ? `<span class="count">${q.unitsPlanned}</span>` : ''}${k === 'progress' && flagged ? `<span class="count">${flagged}</span>` : ''}</a>`;
   $('#nav').innerHTML = NAV.map(n => item(n, false)).join('');
   $('#tabbar').innerHTML = NAV.map(n => item(n, true)).join('');
+  const g = $('#gear'); if (g) g.setAttribute('aria-current', S.route === 'prefs' ? 'page' : 'false');
 }
 function renderBanner() {
   const msgs = [];
@@ -246,11 +247,12 @@ async function checkUnitPass(unitId) {
   const unit = S.units[unitId]; if (!unit || unit.passedAt) return;
   const st = L.unitStatus(cardsOf('unitId', unitId).filter(c => c.type === 'teachback' && c.status !== 'retired'), settingsFor(unit.courseId).strictness);
   if (!st.passed) return;
-  await patch('units', unitId, { passedAt: Date.now(), passScore: st.avg }).catch(() => { });
+  const first = !unit.passCounted;
+  await patch('units', unitId, { passedAt: Date.now(), passScore: st.avg, passCounted: true }).catch(() => { });
   const all = unitsOf(unit.courseId), courseDone = all.length > 0 && all.every(u => u.passedAt || u.id === unitId);
   if (courseDone && S.courses[unit.courseId] && !S.courses[unit.courseId].doneAt) await patch('courses', unit.courseId, { doneAt: Date.now() }).catch(() => { });
-  await bumpMeta((m, day) => { m.stats.unitsPassed++; addXp(m, day, L.xpFor({ kind: 'unitPass' })); if (courseDone) m.stats.coursesDone++; });
-  toast(`Unit passed: ${unit.title} (${st.avg}).`);
+  if (first) await bumpMeta((m, day) => { m.stats.unitsPassed++; addXp(m, day, L.xpFor({ kind: 'unitPass' })); if (courseDone) m.stats.coursesDone++; });
+  toast(`Module passed: ${unit.title} (${st.avg}).`);
 }
 /* Pull every card of an idea (or a unit, when the idea is unknown) earlier after a miss in a test or game. */
 async function pullIdea(courseId, unitId, ideaTitle) {

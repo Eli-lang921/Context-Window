@@ -9,25 +9,37 @@ function tbCards(unitId) { return cardsOf('unitId', unitId).filter(c => c.type =
 function unitProgress(unit) {
   const tb = tbCards(unit.id), done = tb.filter(c => c.firstScore != null).length;
   const st = L.unitStatus(tb, settingsFor(unit.courseId).strictness);
-  return { built: unit.status === 'ready', total: tb.length, done, avg: st.avg, passed: !!unit.passedAt };
+  const ls = unit.lessons || [], builtN = ls.filter(l => l.built).length;
+  return { built: builtN > 0, pending: ls.length - builtN, lessons: ls.length, total: tb.length, done, avg: st.avg, passed: !!unit.passedAt };
 }
-function lessonDone(lid) { const cs = cardsOf('lessonId', lid).filter(c => c.type === 'teachback' && c.status !== 'retired'); return cs.length > 0 && cs.every(c => c.firstScore != null); }
+/* A "review cards only" lesson has no lesson to sit through, so it counts as done once it is built. */
+function lessonDone(lid) {
+  const m = /^(.+)L(\d+)$/.exec(lid), u = m && S.units[m[1]], l = u && (u.lessons || [])[+m[2]];
+  if (l && l.depth === 'review') return !!l.built;
+  const cs = cardsOf('lessonId', lid).filter(c => c.type === 'teachback' && c.status !== 'retired');
+  return cs.length > 0 && cs.every(c => c.firstScore != null);
+}
 function nextLesson(cid) {
   for (const u of unitsOf(cid)) {
     if (u.passedAt && u.reviewOnly) continue;
-    if (u.status !== 'ready') return { unit: u, build: true };
-    for (const lid of lessonIds(u)) if (!lessonDone(lid)) return { unit: u, lid };
+    const ls = u.lessons || [];
+    if (!ls.length) return { unit: u, build: true };
+    for (let n = 0; n < ls.length; n++) { if (!ls[n].built) return { unit: u, build: true }; if (!lessonDone(u.id + 'L' + n)) return { unit: u, lid: u.id + 'L' + n }; }
   }
   return null;
 }
 function coursePace(c) {
   const us = unitsOf(c.id); let left = 0, total = 0;
-  for (const u of us) { const n = Math.max(1, (u.lessons || []).length || 4); total += n; if (u.passedAt) continue; left += u.status === 'ready' ? lessonIds(u).filter(l => !lessonDone(l)).length : n; }
+  for (const u of us) {
+    const ls = u.lessons || [], n = Math.max(1, ls.length || 4); total += n;
+    if (u.passedAt) continue;
+    left += ls.length ? ls.filter((l, k) => !l.built || !lessonDone(u.id + 'L' + k)).length : n;
+  }
   return L.pace(c, { today: today(), lessonsLeft: left, lessonsTotal: total, restDays: settingsFor().restDays });
 }
 function paceChip(c) {
   const p = coursePace(c);
-  if (p.mode === 'self') return chip('Self-paced');
+  if (p.mode === 'self') return '';
   if (p.status === 'done') return chip('All lessons done', 'good');
   if (p.status === 'past') return chip('Target date passed', 'bad');
   return chip(p.status === 'behind' ? `Behind · ${p.daysLeft} days left` : `On track · ${p.daysLeft} days left`, p.status === 'behind' ? 'bad' : 'good');
@@ -41,47 +53,57 @@ VIEWS.courses = () => {
     : emptyBox('No courses yet. A course starts from a goal, such as passing an exam. Claude drafts the syllabus and you edit it before anything is built.')}</div>`;
 };
 
-/* ---------- New course ---------- */
+/* ---------- New course: a name is enough; everything else is optional ---------- */
 VIEWS.newcourse = () => {
-  const w = ui('wiz', () => ({ title: '', goal: '', why: '', level: 'beginner', minutes: '30', examQuestions: '', examMinutes: '', examStyle: '', examPassing: '', deadline: '', mixOutline: settingsFor().mix.outline !== false, mixOwn: settingsFor().mix.own !== false, mixAi: settingsFor().mix.ai !== false, outline: '', strictness: globalSettings().strictness || 'standard' }));
-  return `<div class="reader stack-lg">${backLink('courses', 'Courses')}<div class="stack"><h1>New course</h1><p class="muted">Start from your goal. Claude drafts a syllabus, and you reorder, rename, add or cut units before anything is built.</p></div>
+  const g = settingsFor();
+  const w = ui('wiz', () => ({ title: '', goal: '', why: '', level: 'beginner', minutes: '30', examQuestions: '', examMinutes: '', examStyle: '', examPassing: '', deadline: '', mixOutline: false, mixOwn: g.mix.own !== false, mixAi: g.mix.ai !== false, outline: '', strictness: globalSettings().strictness || 'standard', more: false }));
+  return `<div class="reader stack-lg">${backLink('courses', 'Courses')}<div class="stack"><h1>New course</h1><p class="muted">Name it and start adding what you learn. Claude files each addition into modules and topics as the course grows.</p></div>
   <div class="panel stack">
-    ${field('Your goal', textIn('wiz.goal', w.goal, 'placeholder="For example: pass the Microeconomics CLEP" maxlength="200"'))}
-    ${field('Course name <span class="muted">(optional)</span>', textIn('wiz.title', w.title, 'placeholder="A short name for the course list" maxlength="80"'))}
-    ${field('Why it matters to you', areaIn('wiz.why', w.why, 2, 'placeholder="Used to pick examples that fit you" maxlength="500"'))}
+    ${field('Course name', textIn('wiz.title', w.title, 'placeholder="For example: AI Cred" maxlength="80"'))}
+    ${field('What you want from it <span class="muted">(optional)</span>', textIn('wiz.goal', w.goal, 'placeholder="For example: use AI well at work, or pass the Microeconomics CLEP" maxlength="200"'), 'Used to pick examples that fit you.')}
+    <div class="row"><button class="btn primary" data-act="course-create" data-mode="quick">Create and add learning</button><button class="btn ghost" data-act="toggle" data-key="wiz.more" aria-expanded="${!!w.more}">${w.more ? 'Hide options' : 'More options'}</button></div>
+  </div>
+  ${w.more ? `<div class="panel stack"><h3>Pace and grading</h3>
     <div class="field"><span>Where you are now</span>${seg('wiz.level', LEVELS, w.level)}</div>
     <div class="row top">${field('Minutes per day', textIn('wiz.minutes', w.minutes, 'inputmode="numeric" maxlength="3" style="max-width:8em"'))}
     ${field('Target date <span class="muted">(optional)</span>', `<input type="date" id="f-wiz-deadline" data-bind="wiz.deadline" value="${esc(w.deadline)}" min="${today()}">`, 'With a date, lessons and review are paced to your minutes per day.')}</div>
+    ${field('Why it matters to you', areaIn('wiz.why', w.why, 2, 'maxlength="500"'))}
+    <div class="field"><span>Grading strictness</span>${seg('wiz.strictness', STRICTNESS, w.strictness)}<span class="small muted">Sets the pass mark for a module: lenient 60, standard 70, strict 80.</span></div>
   </div>
-  <div class="panel stack"><h3>Exam details <span class="muted small">(skip if there is no exam)</span></h3>
+  <div class="panel stack"><h3>Exam <span class="muted small">(skip if there is none)</span></h3>
     <div class="row top">${field('Questions', textIn('wiz.examQuestions', w.examQuestions, 'inputmode="numeric" maxlength="3" placeholder="80"'))}${field('Minutes', textIn('wiz.examMinutes', w.examMinutes, 'inputmode="numeric" maxlength="3" placeholder="90"'))}${field('Passing score', textIn('wiz.examPassing', w.examPassing, 'maxlength="40" placeholder="50 of 80, or 70%"'))}</div>
     ${field('Question style', textIn('wiz.examStyle', w.examStyle, 'maxlength="200" placeholder="Multiple choice, 5 options, graphs to read"'))}
-    <div class="field"><span>Grading strictness</span>${seg('wiz.strictness', STRICTNESS, w.strictness)}<span class="small muted">Strict suits exams. It sets the pass mark for units: lenient 60, standard 70, strict 80.</span></div>
   </div>
-  <div class="panel stack"><h3>Where the syllabus comes from</h3><p class="small muted">Pick any mix. Anything Claude adds is labeled "Added, not from your source" and gets a self-check pass.</p>
-    <label class="tick"><input type="checkbox" id="mix-outline" data-bind="wiz.mixOutline" ${w.mixOutline ? 'checked' : ''}><span><b>An official outline I paste</b> as the skeleton (for example the College Board CLEP outline)</span></label>
-    <label class="tick"><input type="checkbox" id="mix-own" data-bind="wiz.mixOwn" ${w.mixOwn ? 'checked' : ''}><span><b>My own material</b> as the content (added on the next screen)</span></label>
+  <div class="panel stack"><h3>Plan the whole course up front</h3><p class="small muted">For a course with a fixed outline, such as an exam. Claude drafts every module first and you edit the list before anything is built. Anything Claude adds from its own knowledge is labeled "Added, not from your source".</p>
+    <label class="tick"><input type="checkbox" id="mix-outline" data-bind="wiz.mixOutline" ${w.mixOutline ? 'checked' : ''}><span><b>An official outline I paste</b> as the skeleton</span></label>
+    <label class="tick"><input type="checkbox" id="mix-own" data-bind="wiz.mixOwn" ${w.mixOwn ? 'checked' : ''}><span><b>My own material</b> as the content</span></label>
     <label class="tick"><input type="checkbox" id="mix-ai" data-bind="wiz.mixAi" ${w.mixAi ? 'checked' : ''}><span><b>Claude's own knowledge</b> to fill gaps</span></label>
     ${w.mixOutline ? field('Official outline', areaIn('wiz.outline', w.outline, 6, 'placeholder="Paste the outline here" maxlength="40000"')) : ''}
-  </div>
-  <div class="row"><button class="btn primary" data-act="course-create">Create course</button><a class="btn ghost" href="#courses">Cancel</a></div></div>`;
+    <div><button class="btn" data-act="course-create" data-mode="plan">Create and plan the syllabus</button></div>
+  </div>` : ''}</div>`;
 };
 function courseFromWiz(w, base = {}) {
-  const num = (v, lo, hi) => { const n = Math.round(Number(v)); return Number.isFinite(n) && n >= lo && n <= hi ? n : null; };
+  const num2 = (v, lo, hi) => { const n = Math.round(Number(v)); return Number.isFinite(n) && n >= lo && n <= hi ? n : null; };
   return Object.assign({}, base, {
-    title: L.str(w.title, 80) || L.str(w.goal, 60), goal: L.str(w.goal, 200), why: L.str(w.why, 500), level: LEVELS.some(l => l[0] === w.level) ? w.level : 'beginner',
-    minutesPerDay: num(w.minutes, 5, 600) || 30, deadline: L.validDay(w.deadline) ? w.deadline : '',
-    exam: { questions: num(w.examQuestions, 1, 500), minutes: num(w.examMinutes, 1, 600), style: L.str(w.examStyle, 200), passing: L.str(w.examPassing, 40) },
+    title: L.str(w.title, 80) || L.str(w.goal, 60), goal: L.str(w.goal, 200) || L.str(w.title, 80), why: L.str(w.why, 500), level: LEVELS.some(l => l[0] === w.level) ? w.level : 'beginner',
+    minutesPerDay: num2(w.minutes, 5, 600) || 30, deadline: L.validDay(w.deadline) ? w.deadline : '',
+    exam: { questions: num2(w.examQuestions, 1, 500), minutes: num2(w.examMinutes, 1, 600), style: L.str(w.examStyle, 200), passing: L.str(w.examPassing, 40) },
     mix: { outline: !!w.mixOutline, own: !!w.mixOwn, ai: !!w.mixAi || (!w.mixOutline && !w.mixOwn) }, outline: w.mixOutline ? L.str(w.outline, 40000) : ''
   });
 }
+async function createCourse(w, mode) {
+  const id = L.uid('c'), quick = mode !== 'plan';
+  const doc = courseFromWiz(w, { status: quick ? 'active' : 'setup', createdAt: Date.now() });
+  if (quick) { doc.mix = Object.assign({}, doc.mix, { own: true }); doc.startedDay = today(); }
+  await put('courses', id, doc); await put('settings', id, { strictness: w.strictness || 'standard' });
+  return id;
+}
 Object.assign(ACT, {
-  'course-create': async () => {
+  'course-create': async el => {
     const w = UI.wiz;
-    if (!w.goal.trim()) { toast('Say what you want to achieve first.'); return; }
-    const id = L.uid('c');
-    try { await put('courses', id, courseFromWiz(w, { status: 'setup', createdAt: Date.now() })); await put('settings', id, { strictness: w.strictness }); } catch (e) { return; }
-    delete UI.wiz; go('course-' + id);
+    if (!w.title.trim() && !w.goal.trim()) { toast('Give the course a name first.'); return; }
+    let id; try { id = await createCourse(w, el.dataset.mode); } catch (e) { return; }
+    delete UI.wiz; go(el.dataset.mode === 'plan' ? 'course-' + id : 'add-' + id);
   }
 });
 
@@ -95,27 +117,41 @@ function inboxGroups() {
   }
   return Object.values(groups).map(g => Object.assign(g, { text: g.parts.sort((a, b) => a.n - b.n).map(p => p.text).join('') })).sort((a, b) => b.createdAt - a.createdAt);
 }
-function materialPanel(cid) {
+/* mode: 'full' (list + add straight into the course), 'add' (bring text into the Add learning box), 'list' (sources only). */
+function materialPanel(cid, mode = 'full') {
   const m = ui('mat', () => ({ tab: 'paste', title: '', text: '', q: '', results: null, note: '' }));
-  const srcs = list('sources').filter(s => s.courseId === cid).sort((a, b) => a.createdAt - b.createdAt);
-  const inbox = inboxGroups(), g = settingsFor();
-  const tabs = [['paste', 'Paste'], ['file', 'File'], ['photo', 'Photos'], ['chat', `From chat${inbox.length ? ` (${inbox.length})` : ''}`]].filter(([k]) => k !== 'paste' || g.sources.paste !== false).concat(connList().map(k => [k, CONNECTORS[k].label]), [['link', 'Web or YouTube']]);
+  UI.matMode = mode;
+  const srcs = cid ? list('sources').filter(s => s.courseId === cid).sort((a, b) => a.createdAt - b.createdAt) : [];
+  const inbox = inboxGroups(), g = settingsFor(), key = 'mat-' + cid;
+  const listHtml = srcs.length ? `<div class="list">${srcs.map(s => `<div class="row between"><div class="grow"><b>${esc(s.title)}</b>${s.staged ? ' ' + chip('Not filed yet', 'due') : ''}<div class="small muted">${esc(KIND_LABEL[s.kind] || 'Material')} · ${num(s.chars).toLocaleString()} characters${num(s.segCount) > 1 ? ` · split into ${num(s.segCount)} ordered parts` : ''}</div></div><button class="btn sm ghost" data-act="mat-del" data-sid="${s.id}">Remove</button></div>`).join('')}</div>` : '<p class="small muted">No sources yet.</p>';
+  if (mode === 'list') return `<div class="panel stack" id="material"><div class="row between"><h3>Sources</h3><span class="small muted">${plural(srcs.length, 'source')}</span></div>${listHtml}<p class="small muted">Removing a source keeps the lessons already built from it.</p></div>`;
+  const tabs = [['paste', mode === 'add' ? 'Type or paste' : 'Paste'], ['file', 'File'], ['photo', 'Photos'], ['chat', `From chat${inbox.length ? ` (${inbox.length})` : ''}`]].filter(([k]) => k !== 'paste' || mode === 'add' || g.sources.paste !== false).concat(connList().map(k => [k, CONNECTORS[k].label]), [['link', 'Web or YouTube']]);
   if (!tabs.some(t => t[0] === m.tab)) m.tab = tabs[0][0];
-  const key = 'mat-' + cid;
   let body = '';
-  if (m.tab === 'paste') body = `${field('Title', textIn('mat.title', m.title, 'maxlength="120" placeholder="Chapter 3 notes"'))}${field('Text', areaIn('mat.text', m.text, 7, 'placeholder="Paste notes, a transcript or an article"'), `${m.text.length.toLocaleString()} characters. Long material is split into ordered parts; nothing is cut.`)}<div><button class="btn primary" data-act="mat-add-paste" data-cid="${cid}">Add material</button></div>`;
+  if (m.tab === 'paste') body = mode === 'add' ? '' : `${field('Title', textIn('mat.title', m.title, 'maxlength="120" placeholder="Chapter 3 notes"'))}${field('Text', areaIn('mat.text', m.text, 7, 'placeholder="Paste notes, a transcript or an article"'), `${m.text.length.toLocaleString()} characters. Long material is split into ordered parts; nothing is cut.`)}<div><button class="btn primary" data-act="mat-add-paste" data-cid="${cid}">Add material</button></div>`;
   else if (m.tab === 'file') body = `${field('Choose a .txt, .md or .pdf file', `<input type="file" id="mat-file" accept=".txt,.md,.markdown,.pdf,text/plain,text/markdown,application/pdf" data-act-change="mat-file" data-cid="${cid}">`)}`;
-  else if (m.tab === 'photo') body = aiOn() && S.imagesOk ? `${field('Photos of textbook pages or handwritten notes', `<input type="file" id="mat-photo" accept="image/png,image/jpeg,image/webp" multiple data-act-change="mat-photo" data-cid="${cid}">`, `Claude reads the image and writes out the text. Up to ${S.imageMax || 5} photos at a time.`)}` : `<p class="small muted">Reading photos needs Claude with image support, which is not available in this view. Type or paste the text instead.</p>`;
-  else if (m.tab === 'chat') body = inbox.length ? `<div class="list">${inbox.map(x => `<div class="row between"><div class="grow"><b>${esc(x.title)}</b><div class="small muted">${x.text.length.toLocaleString()} characters</div></div><div class="row"><button class="btn sm primary" data-act="mat-inbox-use" data-cid="${cid}" data-key="${esc(x.key)}">Add</button><button class="btn sm ghost" data-act="mat-inbox-drop" data-key="${esc(x.key)}">Discard</button></div></div>`).join('')}</div>` : `<p class="small muted">Nothing waiting. See "Web or YouTube" for how to send material here from a chat.</p>`;
+  else if (m.tab === 'photo') body = aiOn() && S.imagesOk ? `${field('Photos of pages, slides or handwritten notes', `<input type="file" id="mat-photo" accept="image/png,image/jpeg,image/webp" multiple data-act-change="mat-photo" data-cid="${cid}">`, `Claude reads the image and writes out the text. Up to ${S.imageMax || 5} photos at a time.`)}` : `<p class="small muted">Reading photos needs Claude with image support, which is not available in this view. Type or paste the text instead.</p>`;
+  else if (m.tab === 'chat') body = inbox.length ? `<div class="list">${inbox.map(x => `<div class="row between"><div class="grow"><b>${esc(x.title)}</b><div class="small muted">${x.text.length.toLocaleString()} characters</div></div><div class="row"><button class="btn sm primary" data-act="mat-inbox-use" data-cid="${cid}" data-key="${esc(x.key)}">Use</button><button class="btn sm ghost" data-act="mat-inbox-drop" data-key="${esc(x.key)}">Discard</button></div></div>`).join('')}</div>` : `<p class="small muted">Nothing waiting. See "Web or YouTube" for how to send material here from a chat.</p>`;
   else if (m.tab === 'link') body = `<p class="small">This page can't open websites or videos itself. Claude can, from a chat:</p><ol class="small steps"><li>Open a chat with Claude in your AI CRED learning project.</li><li>Paste the link with the message below.</li><li>The text appears under <b>From chat</b> here.</li></ol><pre id="link-msg">Send this to Context Window (my study artifact): [paste link]</pre><div><button class="btn sm" data-act="copy" data-target="link-msg">Copy message</button></div>`;
   else body = `<p class="small muted">${esc(CONNECTORS[m.tab].hint)}</p><div class="row nowrap">${textIn('mat.q', m.q, 'placeholder="Search words" maxlength="200"')}<button class="btn" data-act="mat-search" data-cid="${cid}" ${isBusy(key) ? 'disabled' : ''}>Search</button></div>
-    ${m.results && m.resultsFor === m.tab ? (m.results.length ? `<div class="list">${m.results.map((r, i) => `<div class="row between"><div class="grow"><b>${esc(r.title)}</b><div class="small muted">${esc(r.sub || '')}</div></div><button class="btn sm primary" data-act="mat-conn-add" data-cid="${cid}" data-i="${i}" ${isBusy(key) ? 'disabled' : ''}>Add</button></div>`).join('')}</div>` : '<p class="small muted">No matches. Try one or two distinctive words.</p>') : ''}`;
-  return `<div class="panel stack" id="material"><div class="row between"><h3>Material</h3><span class="small muted">${plural(srcs.length, 'source')}</span></div>
-    ${srcs.length ? `<div class="list">${srcs.map(s => `<div class="row between"><div class="grow"><b>${esc(s.title)}</b><div class="small muted">${esc(KIND_LABEL[s.kind] || 'Material')} · ${num(s.chars).toLocaleString()} characters${num(s.segCount) > 1 ? ` · split into ${num(s.segCount)} ordered parts` : ''}</div></div><button class="btn sm ghost" data-act="mat-del" data-sid="${s.id}">Remove</button></div>`).join('')}</div>` : '<p class="small muted">No material yet. Without any, Claude builds the course from its own knowledge and labels it as added.</p>'}
-    <div class="seg scroll" role="group" aria-label="Add from">${tabs.map(([k, l]) => `<button type="button" data-act="set" data-key="mat.tab" data-val="${k}" aria-pressed="${m.tab === k}">${esc(l)}</button>`).join('')}</div>
-    ${body}${m.note ? `<div class="small muted">${esc(m.note)}</div>` : ''}${busyHtml(key)}</div>`;
+    ${m.results && m.resultsFor === m.tab ? (m.results.length ? `<div class="list">${m.results.map((r, i) => `<div class="row between"><div class="grow"><b>${esc(r.title)}</b><div class="small muted">${esc(r.sub || '')}</div></div><button class="btn sm primary" data-act="mat-conn-add" data-cid="${cid}" data-i="${i}" ${isBusy(key) ? 'disabled' : ''}>Use</button></div>`).join('')}</div>` : '<p class="small muted">No matches. Try one or two distinctive words.</p>') : ''}`;
+  const tabsHtml = `<div class="seg scroll" role="group" aria-label="Bring it in from">${tabs.map(([k, l]) => `<button type="button" data-act="set" data-key="mat.tab" data-val="${k}" aria-pressed="${m.tab === k}">${esc(l)}</button>`).join('')}</div>`;
+  const tail = `${body}${m.note ? `<div class="small muted">${esc(m.note)}</div>` : ''}${busyHtml(key)}`;
+  if (mode === 'add') return `<div class="stack tight">${tabsHtml}${tail}</div>`;
+  return `<div class="panel stack" id="material"><div class="row between"><h3>Material</h3><span class="small muted">${plural(srcs.length, 'source')}</span></div>${srcs.length ? listHtml : '<p class="small muted">No material yet. Without any, Claude builds the course from its own knowledge and labels it as added.</p>'}${tabsHtml}${tail}</div>`;
 }
 async function matAdd(cid, src) {
+  if (UI.matMode === 'add') {
+    const a = UI.add, t = String(src.text || '').trim();
+    if (!a) return null;
+    if (!t) { toast('That came back empty.', true); return null; }
+    a.text = a.text.trim() ? a.text.trim() + '\n\n' + t : t;
+    if (!a.title.trim()) a.title = L.str(src.title, 120);
+    a.kind = src.kind || a.kind;
+    Object.assign(UI.mat, { note: '', results: null, tab: 'paste' });
+    toast('Brought in. Check it below, then tap the plan button.'); render();
+    return 'staged';
+  }
   const sid = await addSource(cid, src);
   if (sid) { const n = S.sources[sid].segCount; toast(n > 1 ? `Added. Split into ${n} ordered parts.` : 'Added.'); Object.assign(UI.mat, { title: '', text: '', note: '' }); }
   render(); return sid;
@@ -143,7 +179,8 @@ Object.assign(ACT, {
   'mat-inbox-use': async el => {
     const g = inboxGroups().find(x => x.key === el.dataset.key); if (!g) return;
     const sid = await matAdd(el.dataset.cid, { title: g.title, kind: 'chat', text: g.text });
-    if (sid) for (const id of g.ids) drop('inbox', id).catch(() => { });
+    if (sid === 'staged') UI.add.inboxIds = (UI.add.inboxIds || []).concat(g.ids);
+    else if (sid) for (const id of g.ids) drop('inbox', id).catch(() => { });
   },
   'mat-inbox-drop': el => { const g = inboxGroups().find(x => x.key === el.dataset.key); if (g) for (const id of g.ids) drop('inbox', id).catch(() => { }); render(); },
   'mat-search': async el => {
@@ -200,8 +237,8 @@ VIEWS.syllabus = cid => {
   const c = S.courses[cid]; if (!c) return emptyBox('This course no longer exists. <a href="#courses">Courses</a>');
   const us = unitsOf(cid), key = 'syl-' + cid;
   const used = new Set(us.flatMap(u => u.segs || [])), loose = list('sources').filter(s => s.courseId === cid).flatMap(s => s.digest || []).filter(d => !used.has(d.ref)).length;
-  return `<div class="reader stack-lg">${backLink('course-' + cid, c.title)}<div class="stack"><span class="eyebrow">Syllabus</span><h1>${c.status === 'active' ? 'Edit the syllabus' : 'Review the syllabus'}</h1>
-  <p class="muted">Reorder, rename, add or cut units. Nothing is built until you open a unit. Each unit is one sitting of 30-45 minutes.</p>${c.syllabusNote ? `<div class="added small">${addedTag('Claude\'s note on gaps')}${esc(c.syllabusNote)}</div>` : ''}${loose ? `<div class="flag small">${plural(loose, 'part')} of your material ${loose === 1 ? 'is' : 'are'} not tied to any unit yet. A unit still draws on a loose part when its topic matches; add a unit if something you need is missing.</div>` : ''}</div>
+  return `<div class="reader stack-lg">${backLink('course-' + cid, c.title)}<div class="stack"><span class="eyebrow">Modules</span><h1>${c.status === 'active' ? 'Edit modules' : 'Review the syllabus'}</h1>
+  <p class="muted">Reorder, rename, add or cut modules. Nothing is built until you choose to.</p>${c.syllabusNote ? `<div class="added small">${addedTag('Claude\'s note on gaps')}${esc(c.syllabusNote)}</div>` : ''}${loose ? `<div class="flag small">${plural(loose, 'part')} of your material ${loose === 1 ? 'is' : 'are'} not tied to any unit yet. A unit still draws on a loose part when its topic matches; add a unit if something you need is missing.</div>` : ''}</div>
   <div class="stack">${us.map((u, i) => `<div class="panel stack tight"><div class="row between"><span class="eyebrow">Unit ${i + 1}</span><div class="row">${originChip(u.origin)}${u.status === 'ready' ? chip('Built', 'good') : ''}
     <button class="btn sm ghost icon" data-act="unit-move" data-uid="${u.id}" data-d="-1" ${i ? '' : 'disabled'} aria-label="Move up">${icon('up')}</button><button class="btn sm ghost icon" data-act="unit-move" data-uid="${u.id}" data-d="1" ${i < us.length - 1 ? '' : 'disabled'} aria-label="Move down">${icon('down')}</button><button class="btn sm ghost icon" data-act="unit-cut" data-uid="${u.id}" aria-label="Cut unit">${icon('x')}</button></div></div>
     <input type="text" id="ut-${u.id}" value="${esc(u.title)}" data-act-change="unit-edit" data-uid="${u.id}" data-f="title" maxlength="120" aria-label="Unit title">
@@ -263,7 +300,7 @@ async function unitMaterialSmart(unit) {
 }
 async function buildUnit(uid) {
   const key = 'build-' + uid;
-  await task(key, 'Planning the unit…', async signal => {
+  await task(key, 'Planning the module…', async signal => {
     let unit = Object.assign({ id: uid }, S.units[uid]); const c = S.courses[unit.courseId], cid = unit.courseId;
     const material = c.mix.own ? await unitMaterialSmart(unit) : '';
     const label = t => { if (S.busy[key]) { S.busy[key].label = t; render(); } };
@@ -274,21 +311,25 @@ async function buildUnit(uid) {
       await patch('units', uid, { lessons }); unit = Object.assign({ id: uid }, S.units[uid]);
     }
     const prior = [], N = unit.lessons.length, t = today();
+    const markBuilt = async n => { const ls = (S.units[uid].lessons || []).map((l, k) => (k === n ? Object.assign({}, l, { built: true }) : l)); await patch('units', uid, { lessons: ls, status: 'ready' }); };
     for (let n = 0; n < N; n++) {
       const lid = uid + 'L' + n, les = unit.lessons[n];
       const have = await getLesson(lid);
-      if (have) { prior.push(...have.ideas.map(i => i.title)); continue; }
-      label(`Writing lesson ${n + 1} of ${N}: ${les.title}`);
-      const raw = await ai(P.lesson({ course: c, unit, lesson: les.ideas.length ? les : { title: les.title, ideas: [les.title] }, prior, material, mix: c.mix }), { signal });
+      if (have) { prior.push(...have.ideas.map(i => i.title)); if (!les.built) await markBuilt(n); continue; }
+      const depth = L.DEPTHS.includes(les.depth) ? les.depth : 'full', early = unit.reviewOnly || depth === 'review';
+      /* A topic added through Add learning carries its own source segments; older ones draw on the module's. */
+      const lesMat = !c.mix.own ? '' : (les.segs && les.segs.length ? await unitMaterial({ segs: les.segs }) : material);
+      label(`Writing topic ${n + 1} of ${N}: ${les.title}`);
+      const raw = await ai(P.lesson({ course: c, unit, lesson: les.ideas.length ? les : { title: les.title, ideas: [les.title] }, prior, material: lesMat, mix: c.mix, depth }), { signal });
       const ideas = L.arr(raw && raw.ideas, 5).map(L.validateIdea).filter(Boolean);
       if (!ideas.length) throw { code: 'invalid_json' };
-      label(`Self-checking lesson ${n + 1} of ${N}…`);
+      label(`Self-checking topic ${n + 1} of ${N}…`);
       let flags = [], checked = true;
       try {
-        const v = await ai(P.verify({ ideas: ideas.map(i => ({ title: i.title, analogy: i.analogy, mechanism: i.mechanism, example: i.example, why: i.why, keyPoints: i.keyPoints, cards: i.cards.map(k => ({ type: k.type, prompt: k.prompt, answer: k.answer, origin: k.origin })) })), material }), { signal });
+        const v = await ai(P.verify({ ideas: ideas.map(i => ({ title: i.title, analogy: i.analogy, mechanism: i.mechanism, example: i.example, why: i.why, keyPoints: i.keyPoints, cards: i.cards.map(k => ({ type: k.type, prompt: k.prompt, answer: k.answer, origin: k.origin })) })), material: lesMat }), { signal });
         flags = L.arr(v && v.flags, 20).map(f => ({ idea: Number(f && f.idea), card: f && Number.isInteger(f.card) ? f.card : null, problem: L.str(f && f.problem, 500), severity: f && f.severity === 'high' ? 'high' : 'low' })).filter(f => f.problem && Number.isInteger(f.idea) && ideas[f.idea]);
       } catch (e) { if (signal.aborted) throw e; checked = false; }
-      const doc = { courseId: cid, unitId: uid, n, title: les.title, checked, createdAt: Date.now(), ideas: [] };
+      const doc = { courseId: cid, unitId: uid, n, title: les.title, depth, checked, createdAt: Date.now(), ideas: [] };
       for (let k = 0; k < ideas.length; k++) {
         const idea = ideas[k], ideaId = lid + 'i' + k, mine = flags.filter(f => f.idea === k);
         const cards = idea.cards; delete idea.cards;
@@ -296,10 +337,10 @@ async function buildUnit(uid) {
         doc.ideas.push(idea);
         const common = { courseId: cid, unitId: uid, lessonId: lid, ideaId, ideaTitle: idea.title, yield: idea.yield, createdAt: Date.now() + k };
         const tbId = ideaId + 't';
-        await put('cards', tbId, L.newCard(Object.assign({}, common, { type: 'teachback', prompt: idea.title, answer: idea.mechanism.text + (idea.why ? '\n\n' + idea.why.text : ''), rubric: idea.keyPoints, prompts: idea.prompts, hints: idea.hints, cloze: idea.cloze, quote: idea.quote, origin: idea.mechanism.origin, tbId, fsrs: unit.reviewOnly ? Object.assign(L.newFsrs(), { due: t }) : L.newFsrs() }, unit.reviewOnly ? { firstScore: unit.placeScore || 85, lastScore: unit.placeScore || 85 } : {})));
+        await put('cards', tbId, L.newCard(Object.assign({}, common, { type: 'teachback', prompt: idea.title, answer: idea.mechanism.text + (idea.why ? '\n\n' + idea.why.text : ''), rubric: idea.keyPoints, prompts: idea.prompts, hints: idea.hints, cloze: idea.cloze, quote: idea.quote, origin: idea.mechanism.origin, tbId, fsrs: early ? Object.assign(L.newFsrs(), { due: t }) : L.newFsrs() }, unit.reviewOnly ? { firstScore: unit.placeScore || 85, lastScore: unit.placeScore || 85 } : {})));
         for (let j = 0; j < cards.length; j++) {
           const f = mine.find(x => x.card === j);
-          await put('cards', ideaId + 'c' + j, L.newCard(Object.assign({}, common, cards[j], { tbId, createdAt: Date.now() + k + j + 1, status: f ? 'flagged' : 'active', flag: f ? f.problem : '', fsrs: unit.reviewOnly ? Object.assign(L.newFsrs(), { due: t }) : L.newFsrs() })));
+          await put('cards', ideaId + 'c' + j, L.newCard(Object.assign({}, common, cards[j], { tbId, createdAt: Date.now() + k + j + 1, status: f ? 'flagged' : 'active', flag: f ? f.problem : '', fsrs: early ? Object.assign(L.newFsrs(), { due: t }) : L.newFsrs() })));
         }
         for (const f of idea.flags) await put('reports', L.uid('r'), { kind: 'flag', courseId: cid, unitId: uid, lessonId: lid, idea: k, reason: f.severity === 'high' ? 'wrong' : 'unclear', text: f.problem, status: 'open', createdAt: Date.now() });
         if (idea.sourceIssue) await put('reports', L.uid('r'), { kind: 'issue', courseId: cid, unitId: uid, lessonId: lid, idea: k, reason: 'source', text: idea.sourceIssue.issue, quote: idea.sourceIssue.quote, status: 'open', createdAt: Date.now() });
@@ -307,6 +348,7 @@ async function buildUnit(uid) {
       }
       if (!checked) await put('reports', L.uid('r'), { kind: 'flag', courseId: cid, unitId: uid, lessonId: lid, idea: null, reason: 'unclear', text: `The self-check pass did not run for the lesson "${les.title}". Its content has not had a second look.`, status: 'open', createdAt: Date.now() });
       await putLesson(lid, doc);
+      await markBuilt(n);
       prior.push(...doc.ideas.map(i => i.title));
       render();
     }
@@ -320,42 +362,49 @@ VIEWS.course = cid => {
   const c0 = S.courses[cid]; if (!c0) return emptyBox('This course no longer exists. <a href="#courses">Courses</a>');
   const c = Object.assign({ id: cid }, c0), us = unitsOf(cid), key = 'syl-' + cid;
   if (c.status !== 'active') {
-    return `<div class="reader stack-lg">${backLink('courses', 'Courses')}<div class="stack"><span class="eyebrow">Setting up</span><h1>${esc(c.title)}</h1><p class="muted">${esc(c.goal)}</p></div>
+    return `<div class="reader stack-lg">${backLink('courses', 'Courses')}<div class="stack"><span class="eyebrow">Planning the syllabus</span><h1>${esc(c.title)}</h1><p class="muted">${esc(c.goal)}</p></div>
     ${c.mix.own ? materialPanel(cid) : `<div class="panel small muted">This course doesn't use your own material. <button class="linkbtn" data-act="course-mix-own" data-cid="${cid}">Add material after all</button></div>`}
-    <div class="panel stack"><h3>Syllabus</h3>${c.status === 'syllabus' ? `<p>A draft is ready with ${plural(us.length, 'unit')}.</p><div class="row"><a class="btn primary" href="#syllabus-${cid}">Review the syllabus</a></div>`
-      : `<p class="small muted">Sources: ${[c.mix.outline && 'official outline', c.mix.own && 'your material', c.mix.ai && 'Claude\'s knowledge'].filter(Boolean).join(', ')}. Add your material above first.</p><div class="row">${aiOn() ? `<button class="btn primary" data-act="syl-draft" data-cid="${cid}" ${isBusy(key) ? 'disabled' : ''}>Draft the syllabus</button>` : needAI}<a class="btn ghost" href="#syllabus-${cid}">Write it by hand</a></div>`}${busyHtml(key)}</div>
+    <div class="panel stack"><h3>Syllabus</h3>${c.status === 'syllabus' ? `<p>A draft is ready with ${plural(us.length, 'module')}.</p><div class="row"><a class="btn primary" href="#syllabus-${cid}">Review the syllabus</a></div>`
+      : `<p class="small muted">Sources: ${[c.mix.outline && 'official outline', c.mix.own && 'your material', c.mix.ai && 'Claude\'s knowledge'].filter(Boolean).join(', ')}. Add your material above first.</p><div class="row">${aiOn() ? `<button class="btn primary" data-act="syl-draft" data-cid="${cid}" ${isBusy(key) ? 'disabled' : ''}>Draft the syllabus</button>` : needAI}<button class="btn ghost" data-act="course-skip-plan" data-cid="${cid}">Skip planning: just add learning</button></div>`}${busyHtml(key)}</div>
     <div class="row"><button class="btn ghost danger" data-act="course-delete" data-cid="${cid}">Delete course</button></div></div>`;
   }
   const p = coursePace(c), nx = nextLesson(cid), cfg = settingsFor(cid), ov = S.settings[cid] || {};
   const due = cardsOf('courseId', cid).filter(x => L.isDue(x, today())).length, passed = us.filter(u => u.passedAt).length;
-  const built = us.filter(u => u.status === 'ready').length;
-  const tab = ui('ctab-' + cid, 'units');
-  return `<div class="stack-lg">${backLink('courses', 'Courses')}<div class="stack"><div class="row between"><h1>${esc(c.title)}</h1><div class="row">${paceChip(c)}${c.cram ? chip('Cram mode on', 'bad') : ''}</div></div><p class="muted">${esc(c.goal)}</p>
-    ${bar(us.length ? 100 * passed / us.length : 0, 'good')}<div class="small muted">${passed} of ${us.length} units passed · ${due} due for review · pass mark ${L.passMark(cfg.strictness)}</div></div>
-  ${p.mode === 'deadline' && p.status !== 'done' && p.status !== 'past' ? `<div class="panel plan"><b>Today's plan:</b> ${plural(p.lessonsPerDay, 'lesson')} (about ${p.minutesNeeded} minutes with review). You set aside ${num(c.minutesPerDay)} minutes a day.${p.status === 'behind' ? ' That is more than your daily time, so the target date is at risk: add minutes, move the date, or cut units.' : ''}</div>` : ''}
-  ${p.cramSuggested && !c.cram ? `<div class="panel plan row between"><span><b>${p.daysLeft} days to your target date.</b> Cram mode reviews only the highest-yield ideas, on top of daily review.</span><button class="btn" data-act="cram-on" data-cid="${cid}">Turn on cram mode</button></div>` : ''}
-  ${!c.placementDone && !built && aiOn() ? `<div class="panel plan row between"><span><b>Already know some of this?</b> A 10-minute placement test turns units you ace into review-only.</span><div class="row"><a class="btn" href="#placement-${cid}">Take placement test</a><button class="btn ghost sm" data-act="place-skip" data-cid="${cid}">Skip</button></div></div>` : ''}
-  <div class="row actions">${nx ? (nx.build ? `<button class="btn primary" data-act="unit-build" data-uid="${nx.unit.id}" ${aiOn() && !isBusy('build-' + nx.unit.id) ? '' : 'disabled'}>Build next unit</button>` : `<a class="btn primary" href="#learn-${nx.lid}">Continue: ${esc(nx.unit.title)}</a>`) : chip('Every lesson done', 'good')}
-    <a class="btn" href="#test-${cid}">Practice test</a><a class="btn" href="#games-${cid}">Games</a><a class="btn" href="#map-${cid}">Mind map</a>${c.cram ? `<a class="btn" href="#cram-${cid}">Cram</a>` : ''}</div>
-  ${seg('ctab-' + cid, [['units', 'Units'], ['material', 'Material'], ['options', 'Options']], tab)}
-  ${tab === 'units' ? `<div class="stack">${us.map((u, i) => { const up = unitProgress(u), bkey = 'build-' + u.id; const gate = i > 0 && !us[i - 1].passedAt && !u.passedAt;
-    return `<div class="panel stack tight unit"><div class="row between"><div class="grow"><span class="eyebrow">Unit ${i + 1}</span><h3>${esc(u.title)}</h3></div><div class="row">${u.reviewOnly ? chip('Review only', 'accent') : ''}${u.passedAt ? chip('Passed' + (u.passScore ? ' · ' + u.passScore : ''), 'good') : up.built && up.done === up.total && up.total ? chip('Below pass mark · ' + up.avg, 'due') : ''}${u.origin === 'added' ? chip('Added by Claude', 'added') : ''}</div></div>
-      ${u.summary ? `<p class="small muted">${esc(u.summary)}</p>` : ''}${gate ? `<div class="small muted">Recommended after you pass unit ${i}. You can still start it now.</div>` : ''}
-      ${up.built ? `${bar(up.total ? 100 * up.done / up.total : 0)}<ol class="lessons small">${u.lessons.map((l, n) => { const lid = u.id + 'L' + n, d = lessonDone(lid); return `<li><a href="#learn-${lid}">${esc(l.title)}</a> ${d ? chip('Done', 'good') : ''}</li>`; }).join('')}</ol>
-        <div class="row"><a class="btn sm" href="#guide-${u.id}">Study guide and audio recap</a></div>`
-        : `<div class="row">${aiOn() ? `<button class="btn sm ${isBusy(bkey) ? '' : 'primary'}" data-act="unit-build" data-uid="${u.id}" ${isBusy(bkey) ? 'disabled' : ''}>${u.status === 'building' || (u.lessons || []).some((l, n) => S.lessons[u.id + 'L' + n]) ? 'Resume building' : 'Build this unit'}</button><span class="small muted">About ${2 * Math.max(3, (u.lessons || []).length) } Claude calls, a few minutes.</span>` : needAI}</div>`}${busyHtml(bkey)}</div>`; }).join('')}
-    <div class="row"><a class="btn sm" href="#syllabus-${cid}">Edit syllabus</a></div></div>` : ''}
-  ${tab === 'material' ? materialPanel(cid) + `<p class="small muted">Material added now is used by units you build from here on.</p>` : ''}
-  ${tab === 'options' ? `<div class="panel stack"><h3>This course only</h3><p class="small muted">These override your global defaults under Settings.</p>
-    <div class="field"><span>Grading strictness</span>${seg('strictness', [['', 'Default']].concat(STRICTNESS), ov.strictness || '', 'course-opt')}</div>
-    <div class="field"><span>Probing depth</span>${seg('probing', [['', 'Default']].concat(PROBING), ov.probing || '', 'course-opt')}</div>
-    <div class="field"><span>Target retention</span>${seg('retention', [['', 'Default'], ['0.85', '85%'], ['0.9', '90%'], ['0.93', '93%'], ['0.95', '95%']], ov.retention ? String(ov.retention) : '', 'course-opt')}</div>
-    <div class="row top">${field('Minutes per day', `<input type="text" id="co-min" value="${esc(c.minutesPerDay)}" inputmode="numeric" maxlength="3" data-act-change="course-field" data-f="minutesPerDay" style="max-width:8em">`)}${field('Target date', `<input type="date" id="co-dl" value="${esc(c.deadline || '')}" data-act-change="course-field" data-f="deadline">`)}</div>
-    ${c.cram ? `<div><button class="btn sm" data-act="cram-off" data-cid="${cid}">Turn off cram mode</button></div>` : ''}</div>
-    <div class="row"><button class="btn ghost danger" data-act="course-delete" data-cid="${cid}">Delete course</button></div>` : ''}</div>`;
+  const anyBuilt = us.some(u => (u.lessons || []).some(l => l.built));
+  const tab = ui('ctab-' + cid, 'units'), menu = ui('cmenu-' + cid, false), log = L.arr(c.log, 30);
+  const head = `${backLink('courses', 'Courses')}<div class="stack tight"><div class="row between"><h1>${esc(c.title)}</h1><div class="row">${us.length ? paceChip(c) : ''}${c.cram ? chip('Cram mode on', 'due') : ''}</div></div>${c.goal && c.goal !== c.title ? `<p class="muted">${esc(c.goal)}</p>` : ''}
+    ${us.length ? `${bar(100 * passed / us.length, 'good')}<div class="small muted">${passed} of ${plural(us.length, 'module')} passed · ${due} due for review</div>` : ''}</div>`;
+  if (tab === 'material' || tab === 'options') {
+    return `<div class="reader stack-lg">${head}<div><button class="btn sm" data-act="set" data-key="ctab-${cid}" data-val="units">← Back to modules</button></div>
+    ${tab === 'material' ? materialPanel(cid, 'list') + `<div><a class="btn primary" href="#add-${cid}">Add learning</a></div>` : `<div class="panel stack"><h3>Options for this course</h3><p class="small muted">These override your defaults in Settings.</p>
+      <div class="field"><span>Grading strictness</span>${seg('strictness', [['', 'Default']].concat(STRICTNESS), ov.strictness || '', 'course-opt')}</div>
+      <div class="field"><span>Probing depth</span>${seg('probing', [['', 'Default']].concat(PROBING), ov.probing || '', 'course-opt')}</div>
+      <div class="field"><span>Target retention</span>${seg('retention', [['', 'Default'], ['0.85', '85%'], ['0.9', '90%'], ['0.93', '93%'], ['0.95', '95%']], ov.retention ? String(ov.retention) : '', 'course-opt')}</div>
+      <div class="row top">${field('Minutes per day', `<input type="text" id="co-min" value="${esc(c.minutesPerDay)}" inputmode="numeric" maxlength="3" data-act-change="course-field" data-f="minutesPerDay" style="max-width:8em">`)}${field('Target date', `<input type="date" id="co-dl" value="${esc(c.deadline || '')}" data-act-change="course-field" data-f="deadline">`)}</div>
+      <p class="small muted">Pass mark for a module: ${L.passMark(cfg.strictness)}.</p></div>
+      <div class="row"><button class="btn ghost danger" data-act="course-delete" data-cid="${cid}">Delete course</button></div>`}</div>`;
+  }
+  const tools = [[`#test-${cid}`, 'Practice test', 'Quick test or full exam simulation'], [`#games-${cid}`, 'Games', 'Match, fill the blank, speed round, quiz board'], [`#cram-${cid}`, 'Cram mode', 'High-yield review before a deadline'],
+    !c.placementDone && !anyBuilt && us.length && aiOn() ? [`#placement-${cid}`, 'Placement test', 'Skip modules you already know'] : null, [`#syllabus-${cid}`, 'Edit modules', 'Rename, reorder, add or cut']].filter(Boolean);
+  return `<div class="stack-lg">${head}
+  <div class="row actions">${nx ? (nx.build ? `<button class="btn primary" data-act="unit-build" data-uid="${nx.unit.id}" ${aiOn() && !isBusy('build-' + nx.unit.id) ? '' : 'disabled'}>Build: ${esc(cut(nx.unit.title, 40))}</button>` : `<a class="btn primary" href="#learn-${nx.lid}">Continue: ${esc(cut(nx.unit.title, 40))}</a>`) : ''}
+    <a class="btn ${nx ? '' : 'primary'}" href="#add-${cid}">${icon('plus')}<span>Add learning</span></a></div>
+  <div class="row quiet"><button class="btn sm ghost" data-act="tutor-open">${icon('chat')}<span>Tutor</span></button><a class="btn sm ghost" href="#map-${cid}">Mind map</a><button class="btn sm ghost" data-act="toggle" data-key="cmenu-${cid}" aria-expanded="${!!menu}">${menu ? 'Hide tools' : 'More tools'}</button></div>
+  ${menu ? `<div class="menu">${tools.map(([h, t, d]) => `<a href="${h}"><b>${t}</b><span class="small muted">${d}</span></a>`).join('')}<button type="button" data-act="set" data-key="ctab-${cid}" data-val="material"><b>Sources</b><span class="small muted">What you have added</span></button><button type="button" data-act="set" data-key="ctab-${cid}" data-val="options"><b>Course options</b><span class="small muted">Strictness, probing, pace, delete</span></button></div>` : ''}
+  ${p.mode === 'deadline' && p.status !== 'done' && p.status !== 'past' && us.length ? `<div class="note"><b>Today's plan:</b> ${plural(p.lessonsPerDay, 'lesson')}, about ${p.minutesNeeded} minutes with review. You set aside ${num(c.minutesPerDay)} minutes a day.${p.status === 'behind' ? ' That is more than your daily time, so the target date is at risk: add minutes, move the date, or cut modules.' : ''}</div>` : ''}
+  ${p.cramSuggested && !c.cram ? `<div class="note row between"><span><b>${p.daysLeft} days to your target date.</b> Cram mode reviews only the highest-yield ideas, on top of daily review.</span><button class="btn sm" data-act="cram-on" data-cid="${cid}">Turn on cram mode</button></div>` : ''}
+  ${us.length ? `<div class="stack"><h2>Modules</h2>${us.map((u, i) => { const up = unitProgress(u), bkey = 'build-' + u.id; const gate = i > 0 && !us[i - 1].passedAt && !u.passedAt && !up.built;
+    return `<div class="panel stack tight unit"><div class="row between"><h3 class="grow">${esc(u.title)}</h3><div class="row">${u.reviewOnly ? chip('Review only', 'accent') : ''}${u.passedAt ? chip('Passed' + (u.passScore ? ' · ' + num(u.passScore) : ''), 'good') : up.built && up.total && up.done === up.total && !up.pending ? chip('Below pass mark · ' + up.avg, 'due') : ''}${u.origin === 'added' ? chip('Added by Claude', 'added') : ''}</div></div>
+      ${u.summary ? `<p class="small muted">${esc(u.summary)}</p>` : ''}${gate ? `<div class="small muted">Recommended after you pass the module before it. You can still start it now.</div>` : ''}
+      ${up.total ? bar(100 * up.done / up.total) : ''}
+      ${(u.lessons || []).length ? `<ol class="lessons small">${u.lessons.map((l, n) => { const lid = u.id + 'L' + n; return `<li>${l.built ? `<a href="#learn-${lid}">${esc(l.title)}</a>` : `<span class="muted">${esc(l.title)}</span>`} ${!l.built ? chip('Not built yet') : l.depth === 'review' ? chip('Review cards only') : lessonDone(lid) ? chip('Done', 'good') : ''}</li>`; }).join('')}</ol>` : '<span class="small muted">Topics are planned when you build this module.</span>'}
+      <div class="row">${up.pending || !up.lessons ? (aiOn() ? `<button class="btn sm ${isBusy(bkey) ? '' : 'primary'}" data-act="unit-build" data-uid="${u.id}" ${isBusy(bkey) ? 'disabled' : ''}>${up.built ? `Build ${plural(up.pending, 'new topic')}` : 'Build this module'}</button>` : needAI) : ''}${up.built ? `<a class="btn sm ghost" href="#guide-${u.id}">Study guide and audio recap</a>` : ''}</div>${busyHtml(bkey)}</div>`; }).join('')}</div>`
+    : `<div class="empty stack"><b>This course is empty.</b><span>Paste what you have learned and Claude will file it into modules and topics, then teach and review it with you.</span><div><a class="btn primary" href="#add-${cid}">Add your first learning</a></div></div>`}
+  ${log.length ? `<div class="stack tight"><h2>Recently added</h2><div class="panel list">${log.slice(0, 5).map(x => `<div class="row between"><span class="grow"><b>${esc(x.title)}</b><br><span class="small muted">${esc(x.summary || '')}</span></span><span class="small muted">${esc(x.day || '')}</span></div>`).join('')}</div></div>` : ''}</div>`;
 };
 Object.assign(ACT, {
   'unit-build': el => buildUnit(el.dataset.uid),
+  'course-skip-plan': async el => { await patch('courses', el.dataset.cid, { status: 'active', startedDay: today(), mix: Object.assign({}, S.courses[el.dataset.cid].mix, { own: true }) }).catch(() => { }); go('add-' + el.dataset.cid); },
   'course-mix-own': el => { const c = S.courses[el.dataset.cid]; patch('courses', el.dataset.cid, { mix: Object.assign({}, c.mix, { own: true }) }).then(render, () => { }); },
   'course-opt': el => { const cid = S.param, k = el.dataset.key, v = el.dataset.val; const cur = Object.assign({}, S.settings[cid] || {}); if (v === '') delete cur[k]; else cur[k] = k === 'retention' ? Number(v) : v; put('settings', cid, cur).then(render, () => { }); render(); },
   'course-field': el => { const cid = S.param, f = el.dataset.f; let v = el.value; if (f === 'minutesPerDay') { v = Math.round(Number(v)); if (!(v >= 5 && v <= 600)) { el.value = S.courses[cid].minutesPerDay; return; } } else if (v && !L.validDay(v)) return; patch('courses', cid, { [f]: v }).then(render, () => { }); },

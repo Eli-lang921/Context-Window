@@ -34,3 +34,4 @@ node tests/smoke.js
 - After the 20-unit cap there is an optional extra round of 10 units that does not affect the streak.
 - A full exam simulation is written in batches of 20 while you answer.
 - Settings has "Back up everything" and "Restore from a backup file".
+- Round 2 (see SPEC.md section 12): Add learning with a filing plan, per-addition depth, tutor feedback turned into weak spots, three-tab navigation, calmer look.

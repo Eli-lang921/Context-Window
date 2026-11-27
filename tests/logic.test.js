@@ -296,3 +296,19 @@ test('review fixes: day finishes when nothing more fits; best first-try score re
   assert.equal(L.unitStatus([c], 'standard').passed, true);
   assert.equal(L.passScoreOf({ firstScore: 72 }), 72);
 });
+
+test('add learning: intake plan validation and unit matching', () => {
+  const plan = L.validateIntake({ title: 'Module 2 chat', found: ['chat', 'feedback', 'spam'],
+    placements: [{ unit: 'Module 2: Prompting', isNew: false, lessons: [{ title: 'Structure', ideas: ['Role and task', ''], segs: ['s1:0'] }, { title: 'No ideas', ideas: [] }] }, { unit: '', lessons: [{ title: 'x', ideas: ['y'] }] }, { unit: 'Empty', lessons: [] }],
+    weakSpots: [{ idea: 'Context', gap: 'Left out the audience', quote: 'you did not say who it is for', card: { type: 'short', prompt: 'What was missing?', answer: 'The audience' } }, { idea: 'no gap' }, { gap: 'Bad card', card: { type: 'mc', prompt: 'x', answer: 'y' } }],
+    skipped: [{ idea: 'Tokens', reason: 'already covered in Module 1' }, {}], note: 5 });
+  assert.equal(plan.placements.length, 1); assert.equal(plan.placements[0].lessons.length, 1); assert.deepEqual(plan.placements[0].lessons[0].ideas, ['Role and task']);
+  assert.deepEqual(plan.found, ['chat', 'feedback']); assert.equal(plan.weakSpots.length, 2); assert.equal(plan.weakSpots[0].card.type, 'short'); assert.equal(plan.weakSpots[1].card, null);
+  assert.equal(plan.skipped.length, 1); assert.equal(plan.note, '5');
+  assert.deepEqual(L.validateIntake(null).placements, []); assert.deepEqual(L.validateIntake('x').weakSpots, []);
+  const units = [{ id: 'a', title: 'Module 1: Foundations' }, { id: 'b', title: 'Module 2: Prompting' }, { id: 'c', title: 'Agents' }];
+  assert.equal(L.matchUnit('module 2: prompting', units), 'b'); assert.equal(L.matchUnit('Module 2 - Advanced prompts', units), 'b', 'same module number joins the existing module');
+  assert.equal(L.matchUnit('AGENTS', units), 'c'); assert.equal(L.matchUnit('Module 3: Tools', units), null); assert.equal(L.matchUnit('Evaluation', units), null); assert.equal(L.matchUnit('', units), null);
+  assert.equal(L.matchUnit('Module 12', [{ id: 'x', title: 'Module 1' }]), null, 'module 12 is not module 1');
+  assert.deepEqual(L.DEPTHS, ['refresher', 'full', 'review']);
+});

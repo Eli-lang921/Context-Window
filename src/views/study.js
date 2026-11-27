@@ -286,7 +286,7 @@ async function tutorMaterial(cid, question) {
 }
 function tutorHtml() {
   const t = S.tutor, cid = currentCourseId(), c = cid && S.courses[cid];
-  if (S.route === 'test' && UI.test && UI.test.phase === 'run') return '';
+  if ((S.route === 'test' && UI.test && UI.test.phase === 'run') || ((S.route === 'add' || S.route === 'newcourse') && !t.open)) return '';
   if (!t.open) return `<button type="button" class="btn primary fab" data-act="tutor-open">${icon('chat')}<span>Tutor</span></button>`;
   const cfg = settingsFor();
   return `<div class="drawer" id="drawer" role="dialog" aria-label="Tutor"><div class="row between"><h3>Tutor</h3><div class="row">${Voice.canSpeak() ? `<button class="btn sm ghost" data-act="voice-mute" aria-pressed="${cfg.voiceOn === false}">${icon(cfg.voiceOn === false ? 'x' : 'sound')}<span>${cfg.voiceOn === false ? 'Muted' : 'Voice on'}</span></button>` : ''}<button class="btn sm ghost" data-act="tutor-close">Close</button></div></div>

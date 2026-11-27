@@ -6,6 +6,7 @@ function setPath(obj, key, value) {
 }
 Object.assign(ACT, {
   'set': el => { setPath(UI, el.dataset.key, el.dataset.val); if (el.dataset.key === 'mat.tab') { UI.mat.results = null; UI.mat.note = ''; if (el.dataset.val === 'photo') ensureLimits(); } render(); },
+  'toggle': el => { const ks = el.dataset.key.split('.'); let o = UI; for (const k of ks.slice(0, -1)) o = o[k] || (o[k] = {}); o[ks[ks.length - 1]] = !o[ks[ks.length - 1]]; render(); },
   'close-modal': () => closeModal(),
   'confirm-yes': () => { const fn = CONFIRM.fn; CONFIRM.fn = null; UI.modal = null; render(); if (fn) return fn(); },
   'copy': el => { const t = document.getElementById(el.dataset.target); if (t) copyText(t.value != null && /TEXTAREA|INPUT/.test(t.tagName) ? t.value : t.textContent, t); },

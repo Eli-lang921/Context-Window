@@ -465,6 +465,30 @@ const L = (() => {
     return answer ? Object.assign(base, { type: 'short', answer }) : null;
   }
 
+  /* ---------- Add learning: the filing plan Claude proposes for a paste ---------- */
+  const DEPTHS = ['refresher', 'full', 'review'];
+  const FOUND = ['lesson', 'notes', 'answers', 'feedback', 'chat'];
+  function validateIntake(raw) {
+    raw = raw && typeof raw === 'object' ? raw : {};
+    const placements = arr(raw.placements, 12).map(p => ({
+      unit: str(p && p.unit, 120), isNew: !!(p && p.isNew),
+      lessons: arr(p && p.lessons, 8).map(l => ({ title: str(l && l.title, 120), ideas: arr(l && l.ideas, 4).map(x => str(x, 160)).filter(Boolean), segs: arr(l && l.segs, 12).map(x => str(x, 60)).filter(Boolean) })).filter(l => l.title && l.ideas.length)
+    })).filter(p => p.unit && p.lessons.length);
+    const weakSpots = arr(raw.weakSpots, 12).map(w => ({ idea: str(w && w.idea, 160), gap: str(w && w.gap, 500), quote: str(w && w.quote, 400), card: validateCard(w && w.card) })).filter(w => w.gap);
+    const skipped = arr(raw.skipped, 20).map(s => ({ idea: str(s && s.idea, 160), reason: str(s && s.reason, 200) })).filter(s => s.idea);
+    return { title: str(raw.title, 120), found: arr(raw.found, 6).map(x => str(x, 20)).filter(x => FOUND.includes(x)), placements, weakSpots, skipped, note: str(raw.note, 400) };
+  }
+  /* Find the existing unit a planned placement belongs to: same title, or the same module number. */
+  function matchUnit(title, units) {
+    const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const t = norm(title); if (!t) return null;
+    const exact = units.find(u => norm(u.title) === t); if (exact) return exact.id;
+    const modNo = s => { const m = /\b(?:module|unit|week|chapter|lesson|part)\s+(\d+)\b/.exec(norm(s)); return m ? m[0].replace(/\s+/g, ' ') : null; };
+    const n = modNo(title); if (!n) return null;
+    const same = units.find(u => modNo(u.title) === n);
+    return same ? same.id : null;
+  }
+
   /* ---------- Markdown export (Obsidian) ---------- */
   function ideaMarkdown(i) {
     const lines = ['### ' + i.title, ''];
@@ -503,6 +527,7 @@ const L = (() => {
     unitStatus, passScoreOf, pace, weakness, cramSelect, ideaLevel, examConfig, scoreTest, clozeMatch,
     accuracyBy, weakestIdeas, weekSummary, settingsFor,
     chunkText, splitSegments, tokens, overlap, slug, passageAround,
+    DEPTHS, FOUND, validateIntake, matchUnit,
     str, arr, validateVisual, validatePart, validateCard, validateIdea, validateSyllabus, validateTestQ, ideaMarkdown, guideMarkdown
   };
 })();

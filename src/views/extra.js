@@ -49,12 +49,12 @@ VIEWS.notebook = () => {
   const f = ui('nbCourse', 'all'), all = list('mistakes').sort((a, b) => b.at - a.at);
   const shown = all.filter(m => f === 'all' || m.courseId === f), cs = courseList().filter(c => all.some(m => m.courseId === c.id));
   const reviewable = [...new Set(shown.map(m => m.cardId).filter(id => id && S.cards[id] && S.cards[id].status === 'active'))];
-  return `<div class="stack-lg">${backLink('more', 'More')}<div class="stack"><h1>Mistake notebook</h1><p class="muted">Every miss, with why. Read it through before a test, or review the cards behind it.</p></div>
+  return `<div class="stack-lg"><h1>Progress</h1>${progressTabs('notebook')}<div class="stack"><h2>Mistake notebook</h2><p class="muted">Every miss, with why. Read it through before a test, or review the cards behind it.</p></div>
   ${cs.length > 1 ? seg('nbCourse', [['all', 'All courses']].concat(cs.map(c => [c.id, c.title])), f) : ''}
   ${shown.length ? `<div class="row">${reviewable.length ? `<button class="btn primary" data-act="nb-review">Review these ${plural(reviewable.length, 'card')}</button>` : ''}<button class="btn ghost" data-act="nb-clear">Clear this list</button></div>
-  <div class="stack">${shown.slice(0, 120).map(m => `<div class="panel stack tight"><div class="row between"><div class="row">${chip({ review: 'Review', lesson: 'Lesson', test: 'Test', game: 'Game', cram: 'Cram' }[m.kind] || 'Review')}${m.guess ? chip('Guess', 'due') : ''}${m.ideaTitle ? chip(m.ideaTitle) : ''}</div><span class="small muted">${esc(m.day || '')}</span></div>
+  <div class="stack">${shown.slice(0, 120).map(m => `<div class="panel stack tight"><div class="row between"><div class="row">${chip({ review: 'Review', lesson: 'Lesson', test: 'Test', game: 'Game', cram: 'Cram', feedback: 'Tutor feedback' }[m.kind] || 'Review')}${m.guess ? chip('Guess', 'due') : ''}${m.ideaTitle ? chip(m.ideaTitle) : ''}</div><span class="small muted">${esc(m.day || '')}</span></div>
     <div class="qprompt small">${inline(m.prompt)}</div>${m.given ? `<div class="small"><b>You said:</b> ${esc(cut(m.given, 300))}</div>` : ''}${m.why ? `<div class="small"><b>Why it was a miss:</b> ${inline(m.why)}</div>` : ''}
-    <div><button class="linkbtn small" data-act="nb-drop" data-id="${m.id}">Remove</button></div></div>`).join('')}</div>` : emptyBox('No misses logged. They appear here from review, lessons, tests and games.')}</div>`;
+    <div><button class="linkbtn small" data-act="nb-drop" data-id="${m.id}">Remove</button></div></div>`).join('')}</div>` : emptyBox('No misses logged. They appear here from review, lessons, tests, games and tutor feedback you paste.')}</div>`;
 };
 Object.assign(ACT, {
   'nb-review': () => { const f = UI.nbCourse; const ids = [...new Set(list('mistakes').filter(m => f === 'all' || m.courseId === f).sort((a, b) => b.at - a.at).map(m => m.cardId).filter(id => id && S.cards[id] && S.cards[id].status === 'active'))].slice(0, 30); if (ids.length) startSession({ kind: 'notebook', title: 'Mistake review', ids, mode: 'light', bucket: 'none', back: 'notebook' }); },
@@ -112,7 +112,7 @@ VIEWS.reports = () => {
   const tab = ui('repTab', 'open');
   const flagged = list('cards').filter(c => c.status === 'flagged'), all = list('reports').sort((a, b) => b.createdAt - a.createdAt);
   const shown = all.filter(r => r.status === tab), openN = all.filter(r => r.status === 'open').length + flagged.length;
-  return `<div class="stack-lg">${backLink('more', 'More')}<div class="row between"><h1>Reports</h1>${tab === 'open' && openN ? '<button class="btn sm" data-act="rep-copy">Copy all for a chat</button>' : ''}</div>
+  return `<div class="stack-lg"><h1>Progress</h1>${progressTabs('reports')}<div class="row between"><h2>Reports</h2>${tab === 'open' && openN ? '<button class="btn sm" data-act="rep-copy">Copy all for a chat</button>' : ''}</div>
   <p class="muted">Items the self-check pass flagged wait here for your approval. Source problems and your own reports are listed too.</p>
   ${seg('repTab', [['open', `Open (${openN})`], ['resolved', `Resolved (${all.length - (openN - flagged.length)})`]], tab)}
   ${tab === 'open' && flagged.length ? `<div class="stack"><h2>Cards waiting for approval</h2>${flagged.map(c => `<div class="qcard"><div class="meta">${chip(TYPE_LABEL[c.type])}${chip((S.units[c.unitId] || {}).title || '')}${c.origin === 'added' ? chip('Added by Claude', 'added') : ''}</div><div class="flag small"><b>Self-check:</b> ${esc(c.flag || 'Flagged')}</div><div class="qprompt">${inline(c.prompt)}</div><div class="answer-box"><span class="lbl">Model answer</span><div class="body small">${paras(c.answer)}</div></div>
@@ -144,7 +144,8 @@ Object.assign(ACT, {
 });
 
 /* ---------- Progress: weekly report, stats, badges ---------- */
-function progressShell(tab, body) { return `<div class="stack-lg"><h1>Progress</h1><div class="seg" role="group">${[['weekly', 'This week'], ['stats', 'Stats'], ['badges', 'Badges']].map(([k, l]) => `<a href="#${k}" class="segbtn" aria-current="${tab === k ? 'page' : 'false'}">${l}</a>`).join('')}</div>${body}</div>`; }
+function progressTabs(tab) { const n = openReportCount(); return `<div class="seg scroll" role="group">${[['weekly', 'This week'], ['stats', 'Stats'], ['notebook', 'Mistakes'], ['reports', 'Reports' + (n ? ` (${n})` : '')], ['badges', 'Badges']].map(([k, l]) => `<a href="#${k}" class="segbtn" aria-current="${tab === k ? 'page' : 'false'}">${l}</a>`).join('')}</div>`; }
+function progressShell(tab, body) { return `<div class="stack-lg"><h1>Progress</h1>${progressTabs(tab)}${body}</div>`; }
 function weeklyNumbers() {
   const m = metaMain(), t = today(), w = L.weekSummary(m.days, t), cs = courseList().filter(c => c.status === 'active');
   const cards = list('cards').filter(c => c.status !== 'retired');
@@ -186,38 +187,38 @@ VIEWS.badges = () => {
 };
 VIEWS.progress = () => VIEWS.weekly();
 
-/* ---------- Home ---------- */
+/* ---------- Today ---------- */
 VIEWS.home = () => {
   const cs = courseList(), active = cs.filter(c => c.status === 'active'), m = metaMain(), d = dayRec(), q = todayPlan(), streak = currentStreak();
   const inbox = inboxGroups().length, open = openReportCount(), extra = todayPlan({ cap: L.EXTRA, used: d.extra, restDay: false });
-  if (!cs.length) return `<div class="stack-lg hero"><div class="stack"><span class="eyebrow">Context Window</span><h1>Learn it, explain it back, keep it.</h1><p class="muted lead">Start a course from a goal. Claude drafts the syllabus, teaches one idea at a time, and has you explain each one back. What you learn comes round again in a short daily review.</p></div>
-    <div class="panel">${renderVisual({ type: 'flow', steps: [{ label: 'Set a goal', detail: 'Add your material or let Claude fill in' }, { label: 'Edit the syllabus', detail: 'Reorder, rename, add, cut' }, { label: 'Learn, then explain', detail: 'One idea, then a teach-back' }, { label: 'Daily review', detail: '20 units a day at most' }] })}</div>
-    <div class="row"><a class="btn primary" href="#newcourse">Start your first course</a>${inbox ? chip(plural(inbox, 'item') + ' waiting from chat', 'accent') : ''}</div></div>`;
-  const weak = L.weakestIdeas(list('cards'), 3);
-  return `<div class="stack-lg"><div class="row between"><div><span class="eyebrow">${new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</span><h1>Today</h1></div><div class="row"><span class="stat-pill streak">${icon('flame')}<b class="num">${streak}</b><span>day streak</span></span><span class="stat-pill xp"><b class="num">${m.xp || 0}</b><span>XP · level ${L.level(m.xp)}</span></span></div></div>
+  if (!cs.length) return `<div class="reader stack-lg hero"><div class="stack"><span class="eyebrow">Context Window</span><h1>Paste what you learned. Explain it back. Keep it.</h1><p class="muted lead">Add anything you are learning: lesson text, your notes, or a whole AI chat with its feedback. Claude files it into a course, has you explain each idea back, and brings it round again in a short daily review.</p></div>
+    ${renderVisual({ type: 'flow', steps: [{ label: 'Paste what you learned', detail: 'Notes, lessons, chats, feedback' }, { label: 'Check the plan', detail: 'Claude files it by module and topic' }, { label: 'Explain it back', detail: 'One idea at a time' }, { label: 'Daily review', detail: '20 units a day at most' }] })}
+    <div class="row"><a class="btn primary" href="#add">Add your first learning</a><a class="btn ghost" href="#newcourse">Or set up a course first</a>${inbox ? chip(plural(inbox, 'item') + ' waiting from chat', 'accent') : ''}</div></div>`;
+  const weak = L.weakestIdeas(list('cards'), 3), setup = cs.filter(c => c.status !== 'active');
+  return `<div class="stack-lg"><div class="row between"><div><span class="eyebrow">${new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</span><h1>Today</h1></div><span class="small muted num">${plural(streak, 'day')} streak · ${m.xp} XP</span></div>
   <div class="grid-2"><div class="stack">
     <div class="panel stack due-panel"><div class="row between"><div><span class="eyebrow">Daily review</span><div class="stat-big num">${q.restDay ? 'Rest day' : q.unitsPlanned}<small>${q.restDay ? '' : ' units · ' + plural(q.items.length, 'item')}</small></div></div>
       ${q.items.length ? `<button class="btn primary" data-act="review-start">Start review</button>` : d.done ? chip('Done for today', 'good') : q.restDay ? `<a class="btn" href="#review">Options</a>` : chip('Nothing due', 'good')}</div>
       ${meter(Math.min(d.units, L.CAP), q.unitsPlanned)}<div class="small muted">${d.units} of ${L.CAP} units used today.${q.backlog && !q.restDay ? ` ${plural(q.backlog, 'more item')} wait for tomorrow.` : ''}${q.restDay ? ' Due items roll to tomorrow and your streak is safe.' : ''}</div>
       ${!q.items.length && !q.restDay && extra.items.length ? `<div class="row"><button class="btn sm" data-act="review-extra">Do ${Math.min(L.EXTRA, extra.unitsPlanned)} more units</button><span class="small muted">Optional. Doesn't affect your streak.</span></div>` : ''}</div>
-    <div class="panel stack"><div class="row between"><h3>Keep learning</h3><a class="small" href="#courses">All courses</a></div>${active.length ? `<div class="list">${active.map(c => { const nx = nextLesson(c.id), p = coursePace(c); return `<div class="stack tight"><div class="row between"><a class="grow title-link" href="#course-${c.id}"><b>${esc(c.title)}</b></a>${paceChip(c)}</div>
-        ${p.mode === 'deadline' && p.status !== 'done' && p.status !== 'past' ? `<div class="small muted">Today: ${plural(p.lessonsPerDay, 'lesson')}, about ${p.minutesNeeded} minutes with review.</div>` : ''}
-        <div class="row">${nx ? (nx.build ? `<a class="btn sm" href="#course-${c.id}">Build "${esc(cut(nx.unit.title, 40))}"</a>` : `<a class="btn sm primary" href="#learn-${nx.lid}">Continue: ${esc(cut(nx.unit.title, 40))}</a>`) : chip('Every lesson done', 'good')}${p.cramSuggested && !c.cram ? `<a class="btn sm" href="#cram-${c.id}">Cram mode suggested</a>` : c.cram ? `<a class="btn sm" href="#cram-${c.id}">Cram</a>` : ''}</div></div>`; }).join('')}</div>` : '<p class="small muted">No active course. Finish setting one up under Courses.</p>'}
-      ${cs.some(c => c.status !== 'active') ? `<div class="list">${cs.filter(c => c.status !== 'active').map(c => `<div class="row between"><span class="grow">${esc(c.title)}</span><a class="btn sm" href="#course-${c.id}">Finish setup</a></div>`).join('')}</div>` : ''}</div>
+    <div class="panel row between"><div class="grow"><b>Learned something new?</b><div class="small muted">Paste it and Claude files it into the right course.</div></div><a class="btn" href="#add">${icon('plus')}<span>Add learning</span></a></div>
+    <div class="stack tight"><h2>Keep learning</h2>${active.length ? `<div class="panel list">${active.map(c => { const nx = nextLesson(c.id), p = coursePace(c); return `<div class="row between"><div class="grow"><a class="title-link" href="#course-${c.id}"><b>${esc(c.title)}</b></a>
+        <div class="small muted">${p.mode === 'deadline' && p.status !== 'done' && p.status !== 'past' ? `Today: ${plural(p.lessonsPerDay, 'lesson')}, about ${p.minutesNeeded} min. ` : ''}${nx ? esc(cut(nx.unit.title, 50)) : unitsOf(c.id).length ? 'Every lesson done' : 'Empty so far'}${p.cramSuggested && !c.cram ? ' · cram mode suggested' : ''}</div></div>
+        ${nx && !nx.build ? `<a class="btn sm primary" href="#learn-${nx.lid}">Continue</a>` : `<a class="btn sm" href="#course-${c.id}">Open</a>`}</div>`; }).join('')}</div>` : '<p class="small muted">No active course yet.</p>'}
+      ${setup.length ? `<div class="panel list">${setup.map(c => `<div class="row between"><span class="grow">${esc(c.title)}</span><a class="btn sm" href="#course-${c.id}">Finish setup</a></div>`).join('')}</div>` : ''}</div>
   </div><div class="stack">
-    <div class="panel stack"><h3>Weak spots</h3>${weak.length ? `<div class="list">${weak.map(i => `<div><b>${esc(i.title || 'Idea')}</b><div class="small muted">${esc((S.units[i.unitId] || {}).title || '')}</div></div>`).join('')}</div><a class="small" href="#weekly">See the weekly report</a>` : '<p class="small muted">Ideas you keep missing show here.</p>'}</div>
-    ${inbox ? `<div class="panel row between"><div><b>${plural(inbox, 'item')} from chat</b><div class="small muted">Open a course's Material tab to add ${inbox === 1 ? 'it' : 'them'}.</div></div><a class="btn sm" href="#courses">Courses</a></div>` : ''}
-    ${open ? `<div class="panel row between"><div><b>${plural(open, 'flagged item')}</b><div class="small muted">Waiting for your look.</div></div><a class="btn sm" href="#reports">Reports</a></div>` : ''}
-    <div class="panel stack tight"><h3>More to do</h3><div class="row"><a class="btn sm" href="#notebook">Mistake notebook</a><a class="btn sm" href="#badges">Badges</a>${active[0] ? `<a class="btn sm" href="#games-${active[0].id}">Games</a><a class="btn sm" href="#test-${active[0].id}">Practice test</a>` : ''}</div></div>
+    <div class="panel stack"><h3>Weak spots</h3>${weak.length ? `<div class="list">${weak.map(i => `<div><b>${esc(i.title || 'Idea')}</b><div class="small muted">${esc((S.units[i.unitId] || {}).title || '')}</div></div>`).join('')}</div><a class="small" href="#notebook">Open the mistake notebook</a>` : '<p class="small muted">Ideas you keep missing show here.</p>'}</div>
+    ${inbox ? `<div class="panel row between"><div class="grow"><b>${plural(inbox, 'item')} from chat</b><div class="small muted">Waiting under Add learning, "From chat".</div></div><a class="btn sm" href="#add">Open</a></div>` : ''}
+    ${open ? `<div class="panel row between"><div class="grow"><b>${plural(open, 'flagged item')}</b><div class="small muted">Waiting for your look.</div></div><a class="btn sm" href="#reports">Reports</a></div>` : ''}
   </div></div></div>`;
 };
 
 /* ---------- More and Settings ---------- */
-VIEWS.more = () => `<div class="stack-lg"><h1>More</h1><div class="grid">${[['notebook', 'Mistake notebook', 'Every miss, with why'], ['reports', 'Reports', 'Flagged items and source problems'], ['badges', 'Badges', 'Streaks, units, teach-backs, tests'], ['prefs', 'Settings', 'Probing, grading, rest days, voice, backup']].map(([h, t, d]) => `<a class="panel deck" href="#${h}"><h3>${t}</h3><p class="small muted">${d}</p></a>`).join('')}</div></div>`;
+VIEWS.more = () => VIEWS.weekly();
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 VIEWS.prefs = () => {
   const g = settingsFor(), bk = ui('bk', () => ({ erase: false, file: null, note: '' }));
-  return `<div class="reader stack-lg">${backLink('more', 'More')}<div class="stack"><h1>Settings</h1><p class="muted">Defaults for every course. A course can override strictness, probing and retention on its Options tab.</p></div>
+  return `<div class="reader stack-lg">${backLink('home', 'Today')}<div class="stack"><h1>Settings</h1><p class="muted">Defaults for every course. A course can override strictness, probing and retention on its Options tab.</p></div>
   <div class="panel stack"><h3>Teach-back</h3>
     <div class="field"><span>Probing depth</span>${seg('probing', PROBING, g.probing, 'pref')}<span class="small muted">How many follow-up questions before scoring. Deep adds edge cases and "why" chains.</span></div>
     <div class="field"><span>Grading strictness</span>${seg('strictness', STRICTNESS, g.strictness, 'pref')}<span class="small muted">Pass mark for a unit: lenient 60, standard 70, strict 80.</span></div></div>

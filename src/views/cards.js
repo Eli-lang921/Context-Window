@@ -22,12 +22,11 @@ function rateRow(it, card) {
   <div class="rate">${L.RATINGS.map(k => `<button type="button" data-act="item-rate" data-r="${k}" class="${r.rating === k ? 'on' : ''} ${r.aiRating === k ? 'sugg' : ''}" aria-pressed="${r.rating === k}">${RATE_LABEL[k]}${iv && !light ? `<small>${k === 'again' ? 'tomorrow' : intervalText(iv[k])}</small>` : ''}</button>`).join('')}</div></div>`;
 }
 function itemTools(it, card) {
-  const key = 'item';
-  return `<div class="tools">
-    <button type="button" class="linkbtn small" data-act="item-explain">Explain</button>
-    <button type="button" class="linkbtn small" data-act="item-ask">Ask a question</button>
+  return `<div class="tools"><button type="button" class="linkbtn small" data-act="item-explain">Explain</button>
+    <button type="button" class="linkbtn small" data-act="item-more" aria-expanded="${!!it.more}">${it.more ? 'Less' : 'More'}</button>
+    ${it.more ? `<button type="button" class="linkbtn small" data-act="item-ask">Ask a question</button>
     <button type="button" class="linkbtn small" data-act="item-master">${card.mastered ? 'Un-master' : 'Mark mastered'}</button>
-    <button type="button" class="linkbtn small" data-act="item-report">Report</button></div>${busyHtml(key)}`;
+    <button type="button" class="linkbtn small" data-act="item-report">Report</button>` : ''}</div>${busyHtml('item')}`;
 }
 function leechHtml(it, card) {
   let h = '';
@@ -162,6 +161,7 @@ Object.assign(ACT, {
   'item-override': () => { const it = curItem(), card = curCard(); if (!it || !card) return; it.res = L.override(it.res, settingsFor(card.courseId).strictness); it.res.guess = false; render(); },
   'item-guess': () => { const it = curItem(); if (!it.res) return; it.res.before = { rating: it.res.rating, verdict: it.res.verdict }; it.res.guess = true; it.res.rating = 'again'; render(); },
   'item-unguess': () => { const it = curItem(); if (!it.res || !it.res.before) return; Object.assign(it.res, it.res.before, { guess: false }); render(); },
+  'item-more': () => { const it = curItem(); if (it) { it.more = !it.more; render(); } },
   'item-snippet': () => { curItem().snippet = !curItem().snippet; render(); },
   'item-skip': () => afterItem(null),
   'item-next': async () => {
@@ -290,7 +290,7 @@ ACT['report-save'] = async el => {
   const r = UI.rep || { reason: 'wrong', note: '' };
   const k = S.cards[el.dataset.card], lu = (/^(.+)L\d+$/.exec(el.dataset.lesson || '') || [])[1], un = k ? k.unitId : lu, co = k ? k.courseId : (S.units[lu] || {}).courseId;
   await put('reports', L.uid('r'), { kind: 'user', unitId: un || null, courseId: co || null, cardId: el.dataset.card || null, lessonId: el.dataset.lesson || null, idea: el.dataset.idea === '' ? null : +el.dataset.idea, reason: r.reason, text: L.str(r.note, 1000), status: 'open', createdAt: Date.now() }).catch(() => { });
-  UI.rep = { reason: 'wrong', note: '' }; UI.modal = null; toast('Reported. Find it under More, then Reports.'); render();
+  UI.rep = { reason: 'wrong', note: '' }; UI.modal = null; toast('Reported. Find it under Progress, then Reports.'); render();
 };
 
 /* ---------- Sessions ---------- */
@@ -345,5 +345,5 @@ VIEWS.review = () => {
   ${q.restDay ? `<p>Today is one of your rest days, so your streak is safe and ${plural(q.dueTotal, 'due item')} roll to tomorrow.</p><div><button class="btn" data-act="rest-override">Review anyway</button></div>`
     : q.items.length ? `<div class="row"><button class="btn primary" data-act="review-start">Start review</button><span class="small muted">${[['teachback', 'teach-back'], ['apply', 'apply-it'], ['short', 'short answer'], ['flash', 'flashcard']].filter(([k]) => mix(k)).map(([k, l]) => plural(mix(k), l)).join(' · ')}</span></div>`
       : `<p>${activeCards().length ? 'Come back tomorrow, or keep going with a lesson.' : 'Cards appear here after you finish your first lesson.'}</p>${extra.items.length ? `<div class="row"><button class="btn" data-act="review-extra">Do ${Math.min(L.EXTRA, extra.unitsPlanned)} more units</button><span class="small muted">Optional extra round, once a day. ${plural(extra.dueTotal, 'item')} still due. Doesn't affect your streak.</span></div>` : ''}`}
-  </div><p class="small muted">Target retention ${Math.round(cfg.retention * 100)}%. Probing: ${esc(cfg.probing)}. Change these under More, then Settings.</p></div>`;
+  </div><p class="small muted">Target retention ${Math.round(cfg.retention * 100)}%. Probing: ${esc(cfg.probing)}. Change these in Settings (the gear icon).</p></div>`;
 };

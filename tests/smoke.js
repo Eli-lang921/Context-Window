@@ -34,6 +34,7 @@ function installMock(mode) {
   const answer = prompt => {
     const text = typeof prompt === 'string' ? prompt : prompt.map(m => m.content).join('\n');
     const task = (/TASK: ([A-Z -]+)/.exec(text) || [])[1] || '?'; window.__calls.push(task);
+    if (task === 'INTAKE') return { title: 'AI Cred module 3 chat ' + X, found: ['chat', 'feedback'], placements: [{ unit: 'Module 3: Tools ' + X, isNew: true, lessons: [{ title: 'Tool use ' + X, ideas: ['Idea 1 ' + X], segs: (text.match(/=== SEGMENT (\S+) ===/) || []).slice(1, 2) }] }], weakSpots: [{ idea: 'Context ' + X, gap: 'You left out the audience ' + X, quote: 'you left out the audience', card: { type: 'short', prompt: 'What was missing? ' + X, answer: 'The audience', rubric: ['audience'], explanation: 'Say who it is for.' } }], skipped: [{ idea: 'Old idea ' + X, reason: 'already covered in Unit 1' }], note: 'Plan note ' + X };
     if (task === 'DIGEST') return { segments: [...text.matchAll(/=== SEGMENT (\S+) ===/g)].map(m => ({ ref: m[1], summary: 'Covers the law of demand and price ' + X })) };
     if (task === 'SYLLABUS') return { units: [1, 2].map(n => ({ title: 'Unit ' + n + ' ' + X, summary: 'Summary ' + n, lessons: [{ title: 'Lesson A' + n, ideas: ['Idea 1'] }, { title: 'Lesson B' + n, ideas: ['Idea 2'] }], segs: (text.match(/^(s\w+:\d+): /m) || []).slice(1, 2), origin: n === 1 ? 'source' : 'added' })), note: 'Gap note ' + X };
     if (task === 'UNIT PLAN') return { lessons: [{ title: 'Planned lesson', ideas: ['Planned idea'] }] };
@@ -86,7 +87,7 @@ const idle = page => page.waitForFunction(() => !Object.keys(S.busy).length, nul
 async function act(page, name, extra = '') { step = name; const b = page.locator(`#view [data-act="${name}"]${extra}, #overlays [data-act="${name}"]${extra}`).first(); await b.waitFor({ timeout: 5000 }); await b.click(); await page.waitForTimeout(40); await idle(page); }
 async function goto(page, hash) { step = 'route ' + hash; await page.evaluate(h => { location.hash = h; }, hash); await page.waitForTimeout(80); await idle(page);
   const state = await page.evaluate(() => ({ html: document.getElementById('view').innerHTML, wide: document.documentElement.scrollWidth > window.innerWidth + 1, xss: window.__xss, img: !!document.querySelector('#view img, #overlays img') }));
-  if (process.env.SHOTS && /^(home|learn|review|course-|map|badges|weekly|games)/.test(hash)) { const w = page.viewportSize().width; await page.emulateMedia({ colorScheme: w < 500 ? 'dark' : 'light' }); await page.screenshot({ path: path.join(process.env.SHOTS, hash.replace(/-.*/, '') + '-' + w + '.png'), fullPage: false }); }
+  if (process.env.SHOTS && /^(home|learn|review|course-|add-|weekly)/.test(hash)) { const w = page.viewportSize().width; await page.emulateMedia({ colorScheme: w < 500 ? 'dark' : 'light' }); await page.screenshot({ path: path.join(process.env.SHOTS, hash.replace(/-.*/, '') + '-' + w + '.png'), fullPage: false }); }
   if (state.html.length < 80) fail('view is empty'); if (/hit a problem/.test(state.html)) fail('view crashed');
   if (state.xss || state.img) fail('unescaped markup reached the page'); if (state.wide) fail('page scrolls sideways');
   return state.html; }
@@ -97,18 +98,18 @@ const fill = (page, id, v) => page.fill('#' + id, v);
   try {
     /* 1. No capabilities at all: the page still renders every static route. */
     let page = await open(browser, 'none');
-    for (const r of ['home', 'review', 'courses', 'newcourse', 'weekly', 'stats', 'badges', 'notebook', 'reports', 'prefs', 'more']) await goto(page, r);
+    for (const r of ['home', 'review', 'courses', 'newcourse', 'add', 'weekly', 'stats', 'badges', 'notebook', 'reports', 'prefs', 'more']) await goto(page, r);
     if (!(await page.locator('.banner').count())) fail('no warning banner without storage');
-    await goto(page, 'newcourse'); await fill(page, 'f-wiz-goal', 'Learn offline'); await act(page, 'course-create');
-    if (!/Setting up/.test(await page.locator('#view').innerHTML())) fail('course not created in memory store');
+    await goto(page, 'newcourse'); await fill(page, 'f-wiz-title', 'Learn offline'); await act(page, 'course-create');
+    if ((await page.evaluate(() => [Object.keys(S.courses).length, S.route].join())) !== '1,add') fail('quick course was not created in the memory store');
     await page.context().close();
 
     /* 2. Full flow with mocked Claude, db, voice and connectors. */
     page = await open(browser, 'full');
     await goto(page, 'home');
     await goto(page, 'newcourse');
-    await fill(page, 'f-wiz-goal', 'Pass Microeconomics CLEP ' + XSS); await fill(page, 'f-wiz-examQuestions', '30'); await fill(page, 'f-wiz-examMinutes', '40'); await fill(page, 'f-wiz-examStyle', 'Multiple choice');
-    await fill(page, 'f-wiz-outline', 'Outline: supply and demand'); await act(page, 'course-create');
+    await fill(page, 'f-wiz-title', 'Pass Microeconomics CLEP ' + XSS); await act(page, 'toggle'); await fill(page, 'f-wiz-examQuestions', '30'); await fill(page, 'f-wiz-examMinutes', '40'); await fill(page, 'f-wiz-examStyle', 'Multiple choice');
+    await page.check('#mix-outline'); await page.waitForTimeout(40); await fill(page, 'f-wiz-outline', 'Outline: supply and demand'); await act(page, 'course-create', '[data-mode="plan"]');
     const cid = await page.evaluate(() => Object.keys(S.courses)[0]);
     await fill(page, 'f-mat-title', 'Chapter 1 ' + XSS); await fill(page, 'f-mat-text', ('The law of demand says quantity demanded falls when price rises. ' + XSS + ' ').repeat(40) + '\n\n' + 'Second part about supply. '.repeat(400));
     await act(page, 'mat-add-paste');
@@ -205,15 +206,36 @@ const fill = (page, id, v) => page.fill('#' + id, v);
     if (pf.g.probing !== 'deep' || pf.g.restDays[0] !== 0 || !pf.saved.some(f => /backup.*\.json$/.test(f))) fail('settings or backup failed');
     const rt = await page.evaluate(async () => { const b = await buildBackup(), n = Object.keys(S.cards).length; const ck = checkBackup(JSON.parse(JSON.stringify(b))); await drop('cards', Object.keys(S.cards)[0]); await restoreBackup(b, true); await new Promise(r => setTimeout(r, 60)); return { ok: ck.ok, same: Object.keys(S.cards).length === n, lessons: Object.keys(b.data.lessons).length, text: Object.keys(b.data.srctext).length, bad: checkBackup({ app: 'x' }).ok }; });
     if (!rt.ok || !rt.same || rt.lessons !== 2 || rt.text < 2 || rt.bad) fail('backup and restore round trip failed: ' + JSON.stringify(rt));
-    await goto(page, 'home'); await goto(page, 'courses'); await goto(page, 'course-' + cid); await act(page, 'set', '[data-val="options"]'); await act(page, 'course-opt', '[data-val="strict"]'); await act(page, 'set', '[data-val="material"]');
+    await goto(page, 'home'); await goto(page, 'courses'); await goto(page, 'course-' + cid); await act(page, 'toggle'); await act(page, 'set', '[data-val="options"]'); await act(page, 'course-opt', '[data-val="strict"]'); await act(page, 'set', '[data-val="units"]'); await act(page, 'set', '[data-val="material"]'); await act(page, 'set', '[data-val="units"]');
+
+    /* Add learning: paste a chat with feedback, check the plan, approve; then add again into the same module. */
+    const beforeAdd = await page.evaluate(() => ({ units: Object.keys(S.units).length, sources: Object.keys(S.sources).length, mistakes: Object.keys(S.mistakes).length }));
+    await goto(page, 'add-' + cid);
+    await fill(page, 'f-add-text', 'Tutor: tools let a model act. ' + XSS + ' Me: I think tools are plugins. Tutor feedback: you left out the audience. '.repeat(6));
+    await fill(page, 'f-add-module', 'Module 3'); await act(page, 'set', '[data-key="add.depth"][data-val="review"]'); await act(page, 'add-plan');
+    step = 'add plan'; html = await page.locator('#view').innerHTML();
+    if (!/Here is the plan/.test(html) || !/Weak spots from the feedback/.test(html) || !/Already in your course/.test(html) || !/A new module/.test(html)) fail('plan screen incomplete');
+    await fill(page, 'f-add-plan-placements-0-lessons-0-title', 'Tool use basics'); await act(page, 'add-approve');
+    step = 'add build'; await page.waitForFunction(() => Object.values(S.units).some(u => /Module 3/.test(u.title) && (u.lessons || []).every(l => l.built)), null, { timeout: 15000 }); await idle(page);
+    const ad = await page.evaluate(c => { const u = Object.entries(S.units).find(([, x]) => /Module 3/.test(x.title)), t = L.studyDay(); const tb = Object.values(S.cards).filter(k => k.unitId === u[0] && k.type === 'teachback'); return { route: S.route, lessons: u[1].lessons.map(l => [l.title, l.depth, l.built].join('|')), tbDue: tb.every(k => k.fsrs.due === t), tb: tb.length, fb: Object.values(S.mistakes).filter(m => m.kind === 'feedback').length, fbCard: Object.values(S.cards).filter(k => k.fromFeedback && k.fsrs.due === t).length, log: (S.courses[c].log || []).length, units: Object.keys(S.units).length, sources: Object.keys(S.sources).length, uid: u[0] }; }, cid);
+    if (ad.route !== 'course' || ad.lessons.join() !== 'Tool use basics|review|true' || !ad.tbDue || ad.tb !== 1 || ad.fb !== 1 || ad.fbCard !== 1 || ad.log !== 1 || ad.units !== beforeAdd.units + 1 || ad.sources !== beforeAdd.sources + 1) fail('add learning result wrong: ' + JSON.stringify(ad));
+    await goto(page, 'course-' + cid);
+    await goto(page, 'add-' + cid); await fill(page, 'f-add-text', 'More notes on tools for the same module. '.repeat(8)); await act(page, 'set', '[data-key="add.depth"][data-val="refresher"]'); await act(page, 'add-plan');
+    step = 'add again'; if ((await page.evaluate(() => UI.add.plan.placements[0].unitId)) !== ad.uid) fail('second paste was not matched to the existing module');
+    await page.uncheck('#ws-0'); await act(page, 'add-approve'); await page.waitForFunction(u => (S.units[u].lessons || []).length === 2 && S.units[u].lessons.every(l => l.built), ad.uid, { timeout: 15000 }); await idle(page);
+    const ad2 = await page.evaluate(u => ({ depth: S.units[u].lessons[1].depth, fb: Object.values(S.mistakes).filter(m => m.kind === 'feedback').length, next: nextLesson(S.units[u].courseId) }), ad.uid);
+    if (ad2.depth !== 'refresher' || ad2.fb !== 1 || !ad2.next) fail('second add wrong: ' + JSON.stringify(ad2));
+    await goto(page, 'add-' + cid); await fill(page, 'f-add-text', 'Something to throw away. '.repeat(8)); await act(page, 'add-plan'); await act(page, 'add-cancel'); await act(page, 'confirm-yes'); await page.waitForTimeout(100);
+    if ((await page.evaluate(() => Object.keys(S.sources).length)) !== ad.sources + 1) fail('discarding an addition left its source behind');
+    await goto(page, 'course-' + cid);
     const calls = await page.evaluate(() => [...new Set(window.__calls)]);
-    for (const t of ['DIGEST', 'SYLLABUS', 'LESSON', 'SELF-CHECK', 'PLACEMENT', 'PROBE', 'TEACH-BACK GRADE', 'HINT', 'GRADE', 'PRACTICE TEST', 'GRADE TEST', 'CRAM SELECTION', 'EXPLAIN', 'QUESTION', 'AUDIO RECAP', 'STUDY GUIDE', 'WEEKLY REPORT', 'TUTOR']) if (!calls.includes(t)) fail('prompt never used: ' + t);
+    for (const t of ['INTAKE', 'DIGEST', 'SYLLABUS', 'LESSON', 'SELF-CHECK', 'PLACEMENT', 'PROBE', 'TEACH-BACK GRADE', 'HINT', 'GRADE', 'PRACTICE TEST', 'GRADE TEST', 'CRAM SELECTION', 'EXPLAIN', 'QUESTION', 'AUDIO RECAP', 'STUDY GUIDE', 'WEEKLY REPORT', 'TUTOR']) if (!calls.includes(t)) fail('prompt never used: ' + t);
     if (calls.includes('?')) fail('a prompt had no TASK line');
 
     /* 3. Phone width: same data, every route, no sideways scroll. */
     await page.setViewportSize({ width: 390, height: 800 });
-    for (const r of ['home', 'review', 'courses', 'newcourse', 'course-' + cid, 'syllabus-' + cid, 'learn-' + lid, 'map-' + cid, 'test-' + cid, 'cram-' + cid, 'games-' + cid, 'guide-' + info.uid, 'placement-' + cid, 'notebook', 'reports', 'weekly', 'stats', 'badges', 'prefs', 'more']) await goto(page, r);
-    await goto(page, 'course-' + cid); await act(page, 'set', '[data-val="options"]'); await act(page, 'course-delete'); await act(page, 'confirm-yes'); await page.waitForTimeout(400);
+    for (const r of ['home', 'review', 'courses', 'newcourse', 'add-' + cid, 'course-' + cid, 'syllabus-' + cid, 'learn-' + lid, 'map-' + cid, 'test-' + cid, 'cram-' + cid, 'games-' + cid, 'guide-' + info.uid, 'placement-' + cid, 'notebook', 'reports', 'weekly', 'stats', 'badges', 'prefs', 'more']) await goto(page, r);
+    await goto(page, 'course-' + cid); await act(page, 'set', '[data-val="options"]'); await act(page, 'course-delete'); await act(page, 'confirm-yes'); await page.waitForTimeout(600);
     const left = await page.evaluate(() => ({ c: Object.keys(S.courses).length, u: Object.keys(S.units).length, k: Object.keys(S.cards).length, s: Object.keys(S.sources).length, t: Object.keys(window.__db.srctext || {}).length, l: Object.keys(window.__db.lessons || {}).length }));
     if (left.c || left.u || left.k || left.s || left.t || left.l) fail('deleting a course left data behind: ' + JSON.stringify(left));
     step = 'done';

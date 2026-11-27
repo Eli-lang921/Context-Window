@@ -122,3 +122,21 @@ All of these:
 - Debate mode (Khanmigo-style). **[assumption: Q83 no preference]**
 - Two-host podcast recaps, explainer videos, live lecture recording.
 - Standalone website.
+
+---
+
+## 12. Round 2 (2026-11-27): Add learning, simpler screens, calmer look
+
+Eli's answers in a second interview. Where this section conflicts with sections 1-10, this section wins.
+
+- **Use case**: Eli is taking a course called AI Cred (an AI tutor that teaches, grades and gives personalized feedback). He pastes what he learned into Context Window, which teaches it, reviews it and organizes it. A course must keep growing as he adds more.
+- **What he pastes**: lesson content, his own notes, his answers with the tutor's feedback, whole AI chats and transcripts. The app must cope with a raw mix of these.
+- **Add learning** is the main action (header button, Today, every course): pick a course (or name a new one), paste or bring text in (file, photos, chat hand-off, Vault, Drive, Notion), optionally name the module, pick the depth.
+- **Plan first**: Claude proposes where the paste goes before anything is built. Eli can change the target module, rename or drop topics, untick weak spots, then approve. Discarding removes the pasted material.
+- **Depth chosen per addition**: short refresher (default; condensed recap then teach-back), full lesson (as section 2), or review cards only (no lesson to sit through; the ideas' cards are due the same day).
+- **Organization**: a unit is a module (he names it, or Claude infers it); lessons inside it are topics. A paste for an existing module extends that module instead of creating a duplicate. Ideas the course already covers are listed as skipped, not rebuilt.
+- **Feedback becomes weak spots**: explicit corrections in pasted tutor feedback are logged in the mistake notebook (kind "Tutor feedback") and each gets a review card aimed at the gap, due the same day. Praise is ignored. Claude must not invent gaps.
+- **Course log**: each course lists what was added and when.
+- **Quick start**: a new course needs only a name. Deadline, exam details, strictness and the goal-first syllabus planning of section 1 stay available under "More options".
+- **Navigation**: three tabs (Today, Courses, Progress). Settings is a gear icon. The course page is one page: Continue, Add learning, Tutor, Mind map, then the modules; practice tests, games, cram, placement, sources, module editing and options sit in a "More tools" menu. Mistake notebook, reports and badges are tabs under Progress. On an item, Explain stays visible; Ask, Mark mastered and Report fold under "More".
+- **Look**: calmer and more minimal (mostly neutral, one accent, flat cards, quieter type). This replaces "playful, StudyFetch-like" in section 8. Badges and XP stay, toned down.

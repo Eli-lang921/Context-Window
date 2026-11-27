@@ -31,7 +31,7 @@ src/
                 (learn → teach-back → probe → score → re-teach/retry), review session, practice test,
                 cram, games (match, fill-blank, speed, jeopardy), tutor drawer, mistake notebook,
                 study guide, weekly report, stats, badges, reports, settings
-  style.css     playful, StudyFetch-like, no mascot, no confetti/sounds/level-up animations
+  style.css     calm and minimal (SPEC.md section 12), no mascot, no confetti/sounds/level-up animations
 tests/
   logic.test.js node tests for every logic.js function
   smoke.js      loads dist/context-window.html in a headless browser with a mocked window.claude
